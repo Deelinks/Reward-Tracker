@@ -1,0 +1,175 @@
+{
+  "entities": {
+    "StaffMember": {
+      "title": "StaffMember",
+      "description": "Front desk staff member profile, unique login ID, and monthly/daily goals.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Unique staff document identifier"
+        },
+        "staffLoginId": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 32,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Unique manager-issued staff login ID (e.g. AUR-101)"
+        },
+        "staffName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Staff member display name"
+        },
+        "role": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Front desk role title"
+        },
+        "avatarColor": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 16,
+          "description": "Hex color code for staff avatar"
+        },
+        "monthlyGoal": {
+          "type": "integer",
+          "description": "Target monthly approved rewards count"
+        },
+        "dailyGoal": {
+          "type": "integer",
+          "description": "Target daily approved rewards count"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 32,
+          "description": "Shared office workspace identifier (aurelia-office)"
+        }
+      },
+      "required": [
+        "id",
+        "staffLoginId",
+        "staffName",
+        "role",
+        "avatarColor",
+        "monthlyGoal",
+        "dailyGoal",
+        "workspaceId"
+      ]
+    },
+    "RewardEntry": {
+      "title": "RewardEntry",
+      "description": "Daily guest rewards number entry logged by a staff member and subject to manager approval.",
+      "type": "object",
+      "properties": {
+        "entryId": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Unique entry identifier"
+        },
+        "staffId": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "ID of the staff member who recorded this entry"
+        },
+        "reservationNumber": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40,
+          "description": "Guest reservation number"
+        },
+        "rewardsNumber": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 20,
+          "pattern": "^[0-9]+$",
+          "description": "16-digit guest rewards number (e.g. 6015995107986345)"
+        },
+        "dateIso": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "description": "Enrollment date YYYY-MM-DD"
+        },
+        "timestamp": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 12,
+          "description": "Submission time HH:MM:SS"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "approved", "rejected"],
+          "description": "Manager approval status"
+        },
+        "reviewedBy": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Manager email who approved or rejected the entry"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 32,
+          "description": "Shared office workspace identifier (aurelia-office)"
+        }
+      },
+      "required": [
+        "entryId",
+        "staffId",
+        "reservationNumber",
+        "rewardsNumber",
+        "dateIso",
+        "timestamp",
+        "status",
+        "workspaceId"
+      ]
+    },
+    "OfficeConfig": {
+      "title": "OfficeConfig",
+      "description": "Global office configuration including manager password and data reset timestamp.",
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 32,
+          "description": "Shared office workspace identifier (aurelia-office)"
+        },
+        "managerPassword": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 64,
+          "description": "Unique password set by the manager for office workstations"
+        },
+        "initialized": {
+          "type": "boolean",
+          "description": "Whether initial staff roster has been seeded"
+        }
+      },
+      "required": ["workspaceId", "managerPassword", "initialized"]
+    }
+  },
+  "firestore": {
+    "/staff_members/{staffId}": {
+      "schema": { "$ref": "#/entities/StaffMember" },
+      "description": "Front desk staff members across workstations"
+    },
+    "/reward_entries/{entryId}": {
+      "schema": { "$ref": "#/entities/RewardEntry" },
+      "description": "All daily guest reward entries across all staff and dates"
+    },
+    "/office_config/{configId}": {
+      "schema": { "$ref": "#/entities/OfficeConfig" },
+      "description": "Office configuration document (configId = 'main')"
+    }
+  }
+}

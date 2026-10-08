@@ -1,0 +1,146 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Default-Deny Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidStaffMember(data) {
+      return data.keys().hasAll([
+          'id',
+          'staffLoginId',
+          'staffName',
+          'role',
+          'avatarColor',
+          'monthlyGoal',
+          'dailyGoal',
+          'workspaceId'
+        ]) &&
+        data.keys().hasOnly([
+          'id',
+          'staffLoginId',
+          'staffName',
+          'role',
+          'avatarColor',
+          'monthlyGoal',
+          'dailyGoal',
+          'workspaceId'
+        ]) &&
+        data.id is string && data.id.size() >= 1 && data.id.size() <= 64 && data.id.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.staffLoginId is string && data.staffLoginId.size() >= 2 && data.staffLoginId.size() <= 32 && data.staffLoginId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.staffName is string && data.staffName.size() >= 1 && data.staffName.size() <= 80 &&
+        data.role is string && data.role.size() >= 1 && data.role.size() <= 80 &&
+        data.avatarColor is string && data.avatarColor.size() >= 4 && data.avatarColor.size() <= 16 &&
+        data.monthlyGoal is int && data.monthlyGoal >= 1 && data.monthlyGoal <= 10000 &&
+        data.dailyGoal is int && data.dailyGoal >= 1 && data.dailyGoal <= 1000 &&
+        data.workspaceId is string && data.workspaceId == 'aurelia-office';
+    }
+
+    function isValidRewardEntry(data) {
+      return data.keys().hasAll([
+          'entryId',
+          'staffId',
+          'reservationNumber',
+          'rewardsNumber',
+          'dateIso',
+          'timestamp',
+          'status',
+          'workspaceId'
+        ]) &&
+        data.keys().hasOnly([
+          'entryId',
+          'staffId',
+          'reservationNumber',
+          'rewardsNumber',
+          'dateIso',
+          'timestamp',
+          'status',
+          'reviewedBy',
+          'workspaceId'
+        ]) &&
+        data.entryId is string && data.entryId.size() >= 1 && data.entryId.size() <= 64 && data.entryId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.staffId is string && data.staffId.size() >= 1 && data.staffId.size() <= 64 && data.staffId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.reservationNumber is string && data.reservationNumber.size() >= 1 && data.reservationNumber.size() <= 40 &&
+        data.rewardsNumber is string && data.rewardsNumber.size() >= 10 && data.rewardsNumber.size() <= 20 && data.rewardsNumber.matches('^[0-9]+$') &&
+        data.dateIso is string && data.dateIso.size() == 10 && data.dateIso.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+        data.timestamp is string && data.timestamp.size() >= 5 && data.timestamp.size() <= 12 &&
+        data.status is string && (data.status == 'pending' || data.status == 'approved' || data.status == 'rejected') &&
+        (!('reviewedBy' in data) || (data.reviewedBy is string && data.reviewedBy.size() >= 3 && data.reviewedBy.size() <= 100)) &&
+        data.workspaceId is string && data.workspaceId == 'aurelia-office';
+    }
+
+    function isValidOfficeConfig(data) {
+      return data.keys().hasAll(['workspaceId', 'managerPassword', 'initialized']) &&
+        data.keys().hasOnly(['workspaceId', 'managerPassword', 'initialized']) &&
+        data.workspaceId is string && data.workspaceId == 'aurelia-office' &&
+        data.managerPassword is string && data.managerPassword.size() >= 4 && data.managerPassword.size() <= 64 &&
+        data.initialized is bool;
+    }
+
+    match /test/{docId} {
+      allow get: if isValidId(docId);
+    }
+
+    match /office_config/{configId} {
+      allow get: if isValidId(configId);
+      allow list: if existing().workspaceId == 'aurelia-office';
+      allow create: if isValidId(configId) && isValidOfficeConfig(incoming());
+      allow update: if isValidOfficeConfig(incoming()) &&
+        isValidId(configId) &&
+        incoming().workspaceId == existing().workspaceId &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['managerPassword', 'initialized']);
+    }
+
+    match /staff_members/{staffId} {
+      allow get: if isValidId(staffId) && existing().workspaceId == 'aurelia-office';
+      allow list: if existing().workspaceId == 'aurelia-office';
+      allow create: if isValidId(staffId) &&
+        isValidStaffMember(incoming()) &&
+        incoming().id == staffId;
+      allow update: if isValidStaffMember(incoming()) &&
+        isValidId(staffId) &&
+        incoming().id == existing().id &&
+        incoming().workspaceId == existing().workspaceId &&
+        (
+          incoming().diff(existing()).affectedKeys().hasOnly(['staffLoginId']) ||
+          incoming().diff(existing()).affectedKeys().hasOnly(['monthlyGoal', 'dailyGoal'])
+        );
+      allow delete: if isValidId(staffId) && existing().workspaceId == 'aurelia-office';
+    }
+
+    match /reward_entries/{entryId} {
+      allow get: if isValidId(entryId) && existing().workspaceId == 'aurelia-office';
+      allow list: if existing().workspaceId == 'aurelia-office';
+      allow create: if isValidId(entryId) &&
+        isValidRewardEntry(incoming()) &&
+        incoming().entryId == entryId &&
+        incoming().status == 'pending' &&
+        exists(/databases/$(database)/documents/staff_members/$(incoming().staffId));
+      allow update: if isValidRewardEntry(incoming()) &&
+        isValidId(entryId) &&
+        incoming().entryId == existing().entryId &&
+        incoming().staffId == existing().staffId &&
+        incoming().reservationNumber == existing().reservationNumber &&
+        incoming().rewardsNumber == existing().rewardsNumber &&
+        incoming().dateIso == existing().dateIso &&
+        incoming().timestamp == existing().timestamp &&
+        incoming().workspaceId == existing().workspaceId &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['status', 'reviewedBy']);
+      allow delete: if isValidId(entryId) && existing().workspaceId == 'aurelia-office';
+    }
+  }
+}

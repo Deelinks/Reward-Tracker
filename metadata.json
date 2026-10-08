@@ -1,0 +1,6 @@
+{
+  "name": "Aurelia Front Desk & Loyalty Telemetry",
+  "description": "Real-time front desk sensor analytics, guest loyalty enrollment performance tracking, customizable monthly rate charts, and management PDF report generation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
