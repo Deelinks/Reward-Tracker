@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
-  MANAGER_EMAIL,
   StaffMemberRecord
 } from '../data/hotelLoyaltyData';
 import { FirestoreActiveSessionDoc } from '../services/firebaseClient';
@@ -454,19 +453,14 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
           /* LOGGED-IN STAFF WORKSPACE: SUBMIT RESERVATION NUMBER & REWARDS NUMBER + CHANGE OWN AUR- ID */
           <div>
             <div className="bg-indigo-950 text-white px-6 py-4 flex flex-wrap items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <span className="px-2.5 py-1 rounded bg-indigo-800 text-amber-300 font-mono-tabular text-xs font-bold">
-                  ID: {session.staffLoginId}
-                </span>
-                <div>
-                  <h2 className="text-lg font-semibold">
-                    Welcome, {session.staffName} · Daily Rewards Number Entry
-                  </h2>
-                  <p className="text-xs text-indigo-200">
-                    Enter the Reservation Number and 16-digit Guest Rewards Number below. Entries
-                    require Manager ({MANAGER_EMAIL}) approval.
-                  </p>
-                </div>
+              <div>
+                <h2 className="text-lg font-semibold">
+                  Welcome, {session.staffName} · Daily Rewards Number Entry
+                </h2>
+                <p className="text-xs text-indigo-200">
+                  Enter the Reservation Number and 16-digit Guest Rewards Number below. Entries
+                  require Manager approval.
+                </p>
               </div>
 
               <div className="flex items-center gap-2.5">
@@ -474,9 +468,7 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
                   type="button"
                   onClick={() => {
                     setIsStaffChangingOwnId(!isStaffChangingOwnId);
-                    setStaffCustomSuffixInput(
-                      session.staffLoginId.replace(/^AUR-?/i, '')
-                    );
+                    setStaffCustomSuffixInput('');
                     setStaffOwnIdError(null);
                   }}
                   className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold bg-amber-400 hover:bg-amber-500 text-slate-950 rounded-lg cursor-pointer transition-colors"
@@ -663,7 +655,7 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
                 <ShieldCheck className="w-6 h-6 text-emerald-400 shrink-0" />
                 <div>
                   <h2 className="text-lg font-semibold">
-                    Manager Control Center · {session.email}
+                    Welcome, Manager · Control Center
                   </h2>
                   <p className="text-xs text-emerald-200">
                     Approve staff entries, create staff &amp; reset Staff IDs, or update your
@@ -1169,7 +1161,12 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
                             </span>
                           </div>
                           <div className="mt-1 text-xs text-slate-600 font-mono-tabular">
-                            ID: <strong className="text-slate-900">{act.loginIdentifier}</strong> · Signed in at {act.signedInAt}
+                            {act.role === 'staff' ? (
+                              <>
+                                ID: <strong className="text-slate-900">{act.loginIdentifier}</strong> ·{' '}
+                              </>
+                            ) : null}
+                            Signed in at {act.signedInAt}
                           </div>
                         </div>
                       </div>
@@ -1191,7 +1188,7 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
                       <span>Change Manager Unique Password</span>
                     </div>
                     <p className="text-xs text-slate-600 mt-1">
-                      Update the password required for Manager ({MANAGER_EMAIL}) sign-in across all
+                      Update the password required for Manager sign-in across all
                       workstations.
                     </p>
                   </div>
@@ -1400,7 +1397,9 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
                       ? '2nd Place · Silver'
                       : '3rd Place · Bronze'}
                   </span>
-                  <span className="font-mono-tabular text-slate-500">ID: {champ.staffLoginId}</span>
+                  {session.role === 'manager' && (
+                    <span className="font-mono-tabular text-slate-500">ID: {champ.staffLoginId}</span>
+                  )}
                 </div>
 
                 <div className="flex items-center justify-between">
@@ -1451,7 +1450,7 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
             <thead>
               <tr className="border-b-2 border-slate-200 text-xs font-semibold text-slate-600 bg-slate-50">
                 <th className="py-3 pl-3 pr-2">Rank</th>
-                <th className="py-3 px-2">Staff ID</th>
+                {session.role === 'manager' && <th className="py-3 px-2">Staff ID</th>}
                 <th className="py-3 pr-4">Staff Name</th>
                 {visibleDays.map((dayNum) => (
                   <th
@@ -1510,9 +1509,11 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
                       <td className="py-3.5 pl-3 pr-2 font-mono-tabular font-bold text-slate-700">
                         #{idx + 1}
                       </td>
-                      <td className="py-3.5 px-2 font-mono-tabular text-xs font-semibold text-slate-500">
-                        {staff.staffLoginId}
-                      </td>
+                      {session.role === 'manager' && (
+                        <td className="py-3.5 px-2 font-mono-tabular text-xs font-semibold text-slate-500">
+                          {staff.staffLoginId}
+                        </td>
+                      )}
                       <td className="py-3.5 pr-4 font-semibold text-slate-900">
                         {staff.staffName}
                         {isCurrentStaff && (
@@ -1638,8 +1639,9 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
                             <div className="bg-white border border-slate-200 rounded-lg p-4">
                               <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-200">
                                 <div className="text-xs font-semibold text-slate-800">
-                                  Rewards Numbers Logged by {staff.staffName} (ID:{' '}
-                                  {staff.staffLoginId}) in {selectedMonthLabel}
+                                  Rewards Numbers Logged by {staff.staffName}
+                                  {session.role === 'manager' ? ` (ID: ${staff.staffLoginId})` : ''} in{' '}
+                                  {selectedMonthLabel}
                                 </div>
                                 <div className="text-xs text-slate-500">
                                   Only Manager-Approved numbers count toward leaderboard rank

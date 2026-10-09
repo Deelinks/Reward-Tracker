@@ -19,10 +19,9 @@ export const AuthGatePage: React.FC<AuthGatePageProps> = ({
   const [roleTab, setRoleTab] = useState<'staff' | 'manager'>('staff');
   const [staffNameInput, setStaffNameInput] = useState<string>('');
   const [staffIdInput, setStaffIdInput] = useState<string>('');
-  const [managerEmailInput, setManagerEmailInput] = useState<string>(MANAGER_EMAIL);
+  const [managerEmailInput, setManagerEmailInput] = useState<string>('');
   const [managerPasswordInput, setManagerPasswordInput] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [showDemoHelper, setShowDemoHelper] = useState<boolean>(false);
 
   const handleStaffSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -56,7 +55,7 @@ export const AuthGatePage: React.FC<AuthGatePageProps> = ({
     const cleanEmail = managerEmailInput.trim().toLowerCase();
 
     if (cleanEmail !== MANAGER_EMAIL.toLowerCase()) {
-      setErrorMsg(`Unauthorized email. Only ${MANAGER_EMAIL} is permitted for Manager access.`);
+      setErrorMsg('Unauthorized email. Only the registered Manager email is permitted.');
       return;
     }
 
@@ -180,41 +179,6 @@ export const AuthGatePage: React.FC<AuthGatePageProps> = ({
                 <UserCheck className="w-4 h-4" />
                 <span>Sign In to Staff Workspace</span>
               </button>
-
-              {/* Quick Demo Staff Lookup Helper */}
-              <div className="pt-3 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setShowDemoHelper(!showDemoHelper)}
-                  className="text-xs font-medium text-indigo-700 hover:underline cursor-pointer"
-                >
-                  {showDemoHelper
-                    ? 'Hide Active Staff Login List'
-                    : 'View Active Staff Names & IDs (Quick Fill)'}
-                </button>
-
-                {showDemoHelper && (
-                  <div className="mt-2.5 grid grid-cols-2 gap-1.5 max-h-44 overflow-y-auto p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs">
-                    {staffRecords.map((s) => (
-                      <button
-                        key={s.id}
-                        type="button"
-                        onClick={() => {
-                          setStaffNameInput(s.staffName);
-                          setStaffIdInput(s.staffLoginId);
-                          setErrorMsg(null);
-                        }}
-                        className="p-1.5 bg-white border border-slate-200 rounded text-left hover:border-indigo-500 cursor-pointer flex items-center justify-between"
-                      >
-                        <span className="font-semibold text-slate-900 truncate">{s.staffName}</span>
-                        <span className="font-mono-tabular text-[11px] font-bold text-indigo-700">
-                          {s.staffLoginId}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
             </form>
           ) : (
             <form onSubmit={handleManagerSubmit} className="space-y-4">
@@ -230,7 +194,7 @@ export const AuthGatePage: React.FC<AuthGatePageProps> = ({
                     setManagerEmailInput(e.target.value);
                     setErrorMsg(null);
                   }}
-                  placeholder="deelinkitsolution@gmail.com"
+                  placeholder="Enter manager email..."
                   className="w-full px-3.5 py-2.5 text-sm font-mono-tabular border border-slate-300 rounded-lg bg-white text-slate-900 focus:outline-none focus:border-amber-600"
                 />
               </div>

@@ -10,7 +10,6 @@ import {
   AVAILABLE_MONTHS,
   INITIAL_MANAGER_PASSWORD,
   INITIAL_STAFF_RECORDS,
-  MANAGER_EMAIL,
   RewardNumberEntry,
   StaffMemberRecord
 } from './data/hotelLoyaltyData';
@@ -275,7 +274,7 @@ export default function App() {
             'manager',
             'MANAGER',
             'Manager',
-            email
+            'MANAGER'
           );
         }}
       />
@@ -322,7 +321,7 @@ export default function App() {
     }
 
     setNoticeBanner(
-      `Submitted Rewards # ${cleanNumber} (Reservation # ${reservationNumber}) under ${targetStaff.staffName} (${targetStaff.staffLoginId}). Synced to all workstations — Pending Manager (${MANAGER_EMAIL}) Approval.`
+      `Submitted Rewards # ${cleanNumber} (Reservation # ${reservationNumber}) under ${targetStaff.staffName}. Synced to all workstations — Pending Manager Approval.`
     );
     setTimeout(() => setNoticeBanner(null), 5000);
   };
@@ -347,7 +346,7 @@ export default function App() {
   const handleManagerApproveAll = async () => {
     await approveAllPendingEntriesInDb(staffRecords);
     setNoticeBanner(
-      `All pending staff rewards numbers have been approved by ${MANAGER_EMAIL} across all workstations.`
+      'All pending staff rewards numbers have been approved by Manager across all workstations.'
     );
     setTimeout(() => setNoticeBanner(null), 4000);
   };
@@ -500,9 +499,7 @@ export default function App() {
           <span>
             Signed In:{' '}
             <strong className="text-white">
-              {session.role === 'staff'
-                ? `${session.staffName} (ID: ${session.staffLoginId})`
-                : `Manager (${session.email})`}
+              {session.role === 'staff' ? session.staffName : 'Manager'}
             </strong>
           </span>
           <span>·</span>
@@ -590,7 +587,9 @@ export default function App() {
             </div>
             <div className="mt-1 text-xs text-slate-500 font-mono-tabular">
               {totalMonthApproved > 0
-                ? `ID: ${topLeader.staffLoginId} · +${topLeader.dayCount} on ${selectedDateIso}`
+                ? session.role === 'manager'
+                  ? `ID: ${topLeader.staffLoginId} · +${topLeader.dayCount} on ${selectedDateIso}`
+                  : `+${topLeader.dayCount} approved on ${selectedDateIso}`
                 : 'Cleared to 0 · Ready for new entries'}
             </div>
           </div>
@@ -637,7 +636,7 @@ export default function App() {
                 {totalPendingCount}
               </span>
               <span className="text-xs text-amber-800 font-medium">
-                {MANAGER_EMAIL}
+                Pending Review
               </span>
             </div>
             <div className="mt-1 text-xs text-slate-500">
@@ -685,8 +684,7 @@ export default function App() {
       <footer className="bg-white border-t border-slate-200 px-6 py-4 mt-12 text-xs text-slate-500">
         <div className="max-w-[1380px] mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
           <span>
-            Kimono · Manager Approval ({MANAGER_EMAIL}) Required for All
-            Entries
+            Kimono · Manager Approval Required for All Entries
           </span>
           <button
             type="button"
