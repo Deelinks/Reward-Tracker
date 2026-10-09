@@ -83,7 +83,7 @@ export const AuthGatePage: React.FC<AuthGatePageProps> = ({
             Protected Front Office Portal
           </div>
           <h1 className="text-2xl font-semibold text-white font-display">
-            Aurelia Staff Rewards
+            Kimono
           </h1>
           <p className="text-xs text-slate-300 mt-1">
             Sign in with your Manager-issued Staff ID or Manager credentials to access the

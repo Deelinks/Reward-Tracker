@@ -384,7 +384,7 @@ export default function App() {
           onClick={(e) => e.preventDefault()}
           className="text-xl font-semibold tracking-tight text-amber-400 font-display whitespace-nowrap"
         >
-          Aurelia Staff Rewards
+          Kimono
         </a>
 
         <div className="hidden md:flex items-center gap-6 text-xs text-slate-300">
@@ -574,7 +574,7 @@ export default function App() {
       <footer className="bg-white border-t border-slate-200 px-6 py-4 mt-12 text-xs text-slate-500">
         <div className="max-w-[1380px] mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
           <span>
-            Aurelia Staff Rewards Tracker · Manager Approval ({MANAGER_EMAIL}) Required for All
+            Kimono · Manager Approval ({MANAGER_EMAIL}) Required for All
             Entries
           </span>
           <button
