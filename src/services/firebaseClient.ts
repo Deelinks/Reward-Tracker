@@ -279,7 +279,7 @@ export async function createRewardEntryInDb(
     entryId: entryId.slice(0, 64),
     staffId: staffId.slice(0, 64),
     reservationNumber: reservationNumber.trim().slice(0, 40),
-    rewardsNumber: rewardsNumber.replace(/\s+/g, '').slice(0, 20),
+    rewardsNumber: rewardsNumber.replace(/\s+/g, '').slice(0, 16),
     dateIso: dateIso.slice(0, 10),
     timestamp: nowTime.slice(0, 12),
     status: 'pending',

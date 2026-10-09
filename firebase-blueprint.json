@@ -87,10 +87,10 @@
         },
         "rewardsNumber": {
           "type": "string",
-          "minLength": 10,
-          "maxLength": 20,
-          "pattern": "^[0-9]+$",
-          "description": "16-digit guest rewards number (e.g. 6015995107986345)"
+          "minLength": 16,
+          "maxLength": 16,
+          "pattern": "^[0-9]{16}$",
+          "description": "Exact 16-digit guest rewards number (e.g. 6015995107986345)"
         },
         "dateIso": {
           "type": "string",

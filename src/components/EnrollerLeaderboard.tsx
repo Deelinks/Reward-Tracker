@@ -173,8 +173,10 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
       setFormError('Please enter the 16-digit Rewards Number (e.g., 6015995107986345).');
       return;
     }
-    if (!/^\d{10,20}$/.test(normalizedRewards)) {
-      setFormError('Rewards Number must contain digits only (sample: 6015995107986345).');
+    if (!/^\d{16}$/.test(normalizedRewards)) {
+      setFormError(
+        `Rewards Number must be exactly 16 digits (currently ${normalizedRewards.length} digits).`
+      );
       return;
     }
 
@@ -593,10 +595,11 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
                     <input
                       type="text"
                       inputMode="numeric"
-                      maxLength={20}
+                      minLength={16}
+                      maxLength={16}
                       value={rewardsNumberInput}
                       onChange={(e) => {
-                        setRewardsNumberInput(e.target.value.replace(/[^\d]/g, ''));
+                        setRewardsNumberInput(e.target.value.replace(/[^\d]/g, '').slice(0, 16));
                         if (formError) setFormError(null);
                       }}
                       placeholder="e.g. 6015995107986345"

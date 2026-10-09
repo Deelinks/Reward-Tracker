@@ -301,6 +301,7 @@ export default function App() {
     dateIso: string
   ) => {
     const cleanNumber = rewardsNumber.replace(/\s+/g, '');
+    if (!/^\d{16}$/.test(cleanNumber)) return;
 
     // Global uniqueness safeguard across all non-rejected entries
     const alreadyExists = staffRecords.some((s) =>
