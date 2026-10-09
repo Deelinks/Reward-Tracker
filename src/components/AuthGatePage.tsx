@@ -79,7 +79,7 @@ export const AuthGatePage: React.FC<AuthGatePageProps> = ({
         {/* Top Brand Header */}
         <div className="bg-slate-900 px-7 py-6 text-white border-b border-slate-800">
           <div className="text-xs font-semibold text-amber-400 tracking-wide uppercase mb-1">
-            Protected Front Office Portal
+            Front desk enrollment tracker
           </div>
           <h1 className="text-2xl font-semibold text-white font-display">
             Kimono
