@@ -185,7 +185,7 @@ export const AuthGatePage: React.FC<AuthGatePageProps> = ({
                     setStaffNameInput(e.target.value);
                     setErrorMsg(null);
                   }}
-                  placeholder="Enter your name (e.g. Busola)"
+                  placeholder="Enter your name"
                   className="w-full px-3.5 py-2.5 text-sm border border-slate-300 rounded-lg bg-white text-slate-900 focus:outline-none focus:border-indigo-600"
                 />
               </div>
