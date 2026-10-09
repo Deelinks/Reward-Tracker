@@ -1,7 +1,10 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import {fileURLToPath} from 'url';
 import {defineConfig} from 'vite';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig(() => {
   return {
@@ -9,6 +12,39 @@ export default defineConfig(() => {
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
+      },
+    },
+    build: {
+      chunkSizeWarningLimit: 550,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes('node_modules/@firebase/firestore') || id.includes('node_modules/firebase/firestore')) {
+              return 'firebase-firestore';
+            }
+            if (id.includes('node_modules/firebase') || id.includes('node_modules/@firebase')) {
+              return 'firebase-core';
+            }
+            if (id.includes('node_modules/jspdf-autotable')) {
+              return 'pdf-autotable';
+            }
+            if (id.includes('node_modules/jspdf')) {
+              return 'jspdf-core';
+            }
+            if (id.includes('node_modules/html2canvas')) {
+              return 'html2canvas';
+            }
+            if (id.includes('node_modules/motion') || id.includes('node_modules/framer-motion')) {
+              return 'motion-vendor';
+            }
+            if (id.includes('node_modules/lucide-react')) {
+              return 'icons-vendor';
+            }
+            if (id.includes('node_modules/react') || id.includes('node_modules/scheduler')) {
+              return 'react-vendor';
+            }
+          },
+        },
       },
     },
     server: {

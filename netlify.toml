@@ -1,0 +1,14 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  # Keep Netlify secret scanning enabled globally, but allowlist verified public Firebase Web SDK identifiers
+  # that are intentionally embedded in the client bundle and firebase-applet-config.json.
+  SECRETS_SCAN_OMIT_KEYS = "VITE_FIREBASE_API_KEY,VITE_FIREBASE_APP_ID,VITE_FIREBASE_AUTH_DOMAIN,VITE_FIREBASE_STORAGE_BUCKET,VITE_FIREBASE_MESSAGING_SENDER_ID,VITE_FIREBASE_PROJECT_ID,VITE_FIREBASE_FIRESTORE_DATABASE_ID"
+  SECRETS_SCAN_OMIT_PATHS = "firebase-applet-config.json,dist/**"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
