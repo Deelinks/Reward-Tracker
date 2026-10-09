@@ -74,7 +74,7 @@ service cloud.firestore {
         ]) &&
         data.entryId is string && data.entryId.size() >= 1 && data.entryId.size() <= 64 && data.entryId.matches('^[a-zA-Z0-9_\\-]+$') &&
         data.staffId is string && data.staffId.size() >= 1 && data.staffId.size() <= 64 && data.staffId.matches('^[a-zA-Z0-9_\\-]+$') &&
-        data.reservationNumber is string && data.reservationNumber.size() >= 1 && data.reservationNumber.size() <= 40 &&
+        data.reservationNumber is string && data.reservationNumber.size() >= 1 && data.reservationNumber.size() <= 40 && data.reservationNumber.matches('^[a-zA-Z0-9_\\-]+$') &&
         data.rewardsNumber is string && data.rewardsNumber.size() == 16 && data.rewardsNumber.matches('^[0-9]{16}$') &&
         data.dateIso is string && data.dateIso.size() == 10 && data.dateIso.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
         data.timestamp is string && data.timestamp.size() >= 5 && data.timestamp.size() <= 12 &&
@@ -84,10 +84,10 @@ service cloud.firestore {
     }
 
     function isValidOfficeConfig(data) {
-      return data.keys().hasAll(['workspaceId', 'managerPassword', 'initialized']) &&
-        data.keys().hasOnly(['workspaceId', 'managerPassword', 'initialized']) &&
+      return data.keys().hasAll(['workspaceId', 'managerPasswordHash', 'initialized']) &&
+        data.keys().hasOnly(['workspaceId', 'managerPasswordHash', 'initialized']) &&
         data.workspaceId is string && data.workspaceId == 'aurelia-office' &&
-        data.managerPassword is string && data.managerPassword.size() >= 4 && data.managerPassword.size() <= 64 &&
+        data.managerPasswordHash is string && data.managerPasswordHash.size() == 64 && data.managerPasswordHash.matches('^[a-f0-9]{64}$') &&
         data.initialized is bool;
     }
 
@@ -129,8 +129,7 @@ service cloud.firestore {
       allow create: if isValidId(configId) && isValidOfficeConfig(incoming());
       allow update: if isValidOfficeConfig(incoming()) &&
         isValidId(configId) &&
-        incoming().workspaceId == existing().workspaceId &&
-        incoming().diff(existing()).affectedKeys().hasOnly(['managerPassword', 'initialized']);
+        incoming().workspaceId == existing().workspaceId;
     }
 
     match /staff_members/{staffId} {

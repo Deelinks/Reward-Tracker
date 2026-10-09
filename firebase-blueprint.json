@@ -83,7 +83,8 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 40,
-          "description": "Guest reservation number"
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Guest reservation number (alphanumeric/hyphens only)"
         },
         "rewardsNumber": {
           "type": "string",
@@ -113,7 +114,7 @@
         "reviewedBy": {
           "type": "string",
           "maxLength": 100,
-          "description": "Manager email who approved or rejected the entry"
+          "description": "Reviewer role identifier (e.g. MANAGER)"
         },
         "workspaceId": {
           "type": "string",
@@ -135,7 +136,7 @@
     },
     "OfficeConfig": {
       "title": "OfficeConfig",
-      "description": "Global office configuration including manager password and data reset timestamp.",
+      "description": "Global office configuration storing the SHA-256 salted hash of the manager password.",
       "type": "object",
       "properties": {
         "workspaceId": {
@@ -144,18 +145,19 @@
           "maxLength": 32,
           "description": "Shared office workspace identifier (aurelia-office)"
         },
-        "managerPassword": {
+        "managerPasswordHash": {
           "type": "string",
-          "minLength": 4,
+          "minLength": 64,
           "maxLength": 64,
-          "description": "Unique password set by the manager for office workstations"
+          "pattern": "^[a-f0-9]{64}$",
+          "description": "SHA-256 salted cryptographic hash of the manager password (never plaintext)"
         },
         "initialized": {
           "type": "boolean",
           "description": "Whether initial staff roster has been seeded"
         }
       },
-      "required": ["workspaceId", "managerPassword", "initialized"]
+      "required": ["workspaceId", "managerPasswordHash", "initialized"]
     },
     "ActiveSession": {
       "title": "ActiveSession",
@@ -183,13 +185,13 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 80,
-          "description": "Staff member name or Manager email"
+          "description": "Staff member name or 'Manager'"
         },
         "loginIdentifier": {
           "type": "string",
           "minLength": 2,
           "maxLength": 80,
-          "description": "Staff Login ID (e.g. AUR-101) or Manager email"
+          "description": "Staff Login ID (e.g. AUR-101) or 'MANAGER'"
         },
         "signedInAt": {
           "type": "string",

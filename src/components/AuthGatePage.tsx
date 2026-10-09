@@ -1,18 +1,24 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { INITIAL_MANAGER_PASSWORD, MANAGER_EMAIL, StaffMemberRecord } from '../data/hotelLoyaltyData';
+import {
+  INITIAL_MANAGER_PASSWORD,
+  INITIAL_MANAGER_PASSWORD_HASH,
+  MANAGER_EMAIL,
+  StaffMemberRecord
+} from '../data/hotelLoyaltyData';
+import { hashManagerPassword } from '../services/firebaseClient';
 import { KeyRound, Lock, ShieldCheck, UserCheck, Users } from 'lucide-react';
 
 interface AuthGatePageProps {
   staffRecords: StaffMemberRecord[];
-  managerPassword: string;
+  managerPasswordHash: string;
   onAuthenticatedStaff: (staff: StaffMemberRecord) => void;
   onAuthenticatedManager: (email: string) => void;
 }
 
 export const AuthGatePage: React.FC<AuthGatePageProps> = ({
   staffRecords,
-  managerPassword,
+  managerPasswordHash,
   onAuthenticatedStaff,
   onAuthenticatedManager
 }) => {
@@ -22,9 +28,40 @@ export const AuthGatePage: React.FC<AuthGatePageProps> = ({
   const [managerEmailInput, setManagerEmailInput] = useState<string>('');
   const [managerPasswordInput, setManagerPasswordInput] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [failedAttempts, setFailedAttempts] = useState<number>(0);
+  const [lockoutUntil, setLockoutUntil] = useState<number>(0);
+
+  const checkRateLimit = (): boolean => {
+    const now = Date.now();
+    if (lockoutUntil > now) {
+      const remainingSec = Math.ceil((lockoutUntil - now) / 1000);
+      setErrorMsg(
+        `Too many failed sign-in attempts. Brute-force protection active — please wait ${remainingSec} seconds.`
+      );
+      return false;
+    }
+    return true;
+  };
+
+  const recordFailedAttempt = (msg: string) => {
+    const nextCount = failedAttempts + 1;
+    setFailedAttempts(nextCount);
+    if (nextCount >= 5) {
+      const lockMs = 30 * 1000; // 30-second cooldown after 5 consecutive failures
+      setLockoutUntil(Date.now() + lockMs);
+      setFailedAttempts(0);
+      setErrorMsg(
+        `${msg} (5 failed attempts detected — locked for 30 seconds to prevent brute-force attacks.)`
+      );
+    } else {
+      setErrorMsg(msg);
+    }
+  };
 
   const handleStaffSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!checkRateLimit()) return;
+
     const cleanName = staffNameInput.trim();
     const cleanId = staffIdInput.trim().toUpperCase();
 
@@ -40,30 +77,35 @@ export const AuthGatePage: React.FC<AuthGatePageProps> = ({
     );
 
     if (!matchedStaff) {
-      setErrorMsg(
+      recordFailedAttempt(
         'Invalid Staff Name or Staff ID. Please verify your credentials with the Manager.'
       );
       return;
     }
 
+    setFailedAttempts(0);
     setErrorMsg(null);
     onAuthenticatedStaff(matchedStaff);
   };
 
-  const handleManagerSubmit = (e: React.FormEvent) => {
+  const handleManagerSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!checkRateLimit()) return;
+
     const cleanEmail = managerEmailInput.trim().toLowerCase();
 
     if (cleanEmail !== MANAGER_EMAIL.toLowerCase()) {
-      setErrorMsg('Unauthorized email. Only the registered Manager email is permitted.');
+      recordFailedAttempt('Unauthorized email. Only the registered Manager email is permitted.');
       return;
     }
 
-    if (managerPasswordInput !== managerPassword) {
-      setErrorMsg('Incorrect Manager password. Please try again.');
+    const inputHash = await hashManagerPassword(managerPasswordInput);
+    if (inputHash !== managerPasswordHash) {
+      recordFailedAttempt('Incorrect Manager password. Please try again.');
       return;
     }
 
+    setFailedAttempts(0);
     setErrorMsg(null);
     onAuthenticatedManager(MANAGER_EMAIL);
   };
@@ -136,6 +178,8 @@ export const AuthGatePage: React.FC<AuthGatePageProps> = ({
                 <input
                   type="text"
                   required
+                  maxLength={80}
+                  autoComplete="off"
                   value={staffNameInput}
                   onChange={(e) => {
                     setStaffNameInput(e.target.value);
@@ -155,6 +199,8 @@ export const AuthGatePage: React.FC<AuthGatePageProps> = ({
                   <input
                     type="text"
                     required
+                    maxLength={32}
+                    autoComplete="off"
                     value={staffIdInput}
                     onChange={(e) => {
                       setStaffIdInput(e.target.value.toUpperCase());
@@ -189,6 +235,8 @@ export const AuthGatePage: React.FC<AuthGatePageProps> = ({
                 <input
                   type="email"
                   required
+                  maxLength={100}
+                  autoComplete="off"
                   value={managerEmailInput}
                   onChange={(e) => {
                     setManagerEmailInput(e.target.value);
@@ -204,16 +252,16 @@ export const AuthGatePage: React.FC<AuthGatePageProps> = ({
                   <label className="text-xs font-semibold text-slate-700">
                     Unique Manager Password
                   </label>
-                  {managerPassword === INITIAL_MANAGER_PASSWORD && (
+                  {managerPasswordHash === INITIAL_MANAGER_PASSWORD_HASH && (
                     <button
                       type="button"
                       onClick={() => {
-                        setManagerPasswordInput(managerPassword);
+                        setManagerPasswordInput(INITIAL_MANAGER_PASSWORD);
                         setErrorMsg(null);
                       }}
                       className="text-[11px] font-semibold text-amber-700 hover:underline cursor-pointer"
                     >
-                      Fill Current Password ({managerPassword})
+                      Fill Current Password ({INITIAL_MANAGER_PASSWORD})
                     </button>
                   )}
                 </div>
@@ -222,6 +270,8 @@ export const AuthGatePage: React.FC<AuthGatePageProps> = ({
                   <input
                     type="password"
                     required
+                    maxLength={64}
+                    autoComplete="off"
                     value={managerPasswordInput}
                     onChange={(e) => {
                       setManagerPasswordInput(e.target.value);

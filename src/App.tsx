@@ -8,7 +8,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
 import {
   AVAILABLE_MONTHS,
-  INITIAL_MANAGER_PASSWORD,
+  INITIAL_MANAGER_PASSWORD_HASH,
   INITIAL_STAFF_RECORDS,
   RewardNumberEntry,
   StaffMemberRecord
@@ -67,7 +67,9 @@ export default function App() {
   );
   const [rewardEntries, setRewardEntries] = useState<FirestoreRewardEntryDoc[]>([]);
   const [activeSessions, setActiveSessions] = useState<FirestoreActiveSessionDoc[]>([]);
-  const [managerPassword, setManagerPassword] = useState<string>(INITIAL_MANAGER_PASSWORD);
+  const [managerPasswordHash, setManagerPasswordHash] = useState<string>(
+    INITIAL_MANAGER_PASSWORD_HASH
+  );
   const [session, setSession] = useState<AuthenticatedSession | null>(null);
   const [workstationSessionId] = useState<string>(
     () => `SESS-${Date.now()}-${Math.floor(Math.random() * 10000)}`
@@ -88,15 +90,15 @@ export default function App() {
 
     ensureOfficeSeeded()
       .then(() => {
-        // 1. Listen to Office Config (Manager Password)
+        // 1. Listen to Office Config (Salted SHA-256 Manager Password Hash)
         const configRef = doc(db, 'office_config', 'main');
         unsubConfig = onSnapshot(
           configRef,
           (snap) => {
             if (snap.exists()) {
               const data = snap.data() as FirestoreOfficeConfigDoc;
-              if (data.managerPassword) {
-                setManagerPassword(data.managerPassword);
+              if (data.managerPasswordHash && data.managerPasswordHash.length === 64) {
+                setManagerPasswordHash(data.managerPasswordHash);
               }
             }
           },
@@ -251,7 +253,7 @@ export default function App() {
     return (
       <AuthGatePage
         staffRecords={staffRecords}
-        managerPassword={managerPassword}
+        managerPasswordHash={managerPasswordHash}
         onAuthenticatedStaff={async (staff) => {
           setSession({
             role: 'staff',
@@ -666,7 +668,7 @@ export default function App() {
           onUpdateStaffRole={handleUpdateStaffRole}
           onUpdateStaffMonthlyGoal={handleUpdateStaffMonthlyGoal}
           onUpdateAllStaffMonthlyGoals={handleUpdateAllStaffMonthlyGoals}
-          managerPassword={managerPassword}
+          managerPasswordHash={managerPasswordHash}
           onChangeManagerPassword={handleChangeManagerPassword}
           onClearAllEntries={handleClearAllEntries}
           activeSessions={activeSessions}
@@ -704,6 +706,7 @@ export default function App() {
         monthLabel={currentMonthMeta.label}
         selectedDateIso={selectedDateIso}
         staffRecords={staffRecords}
+        includeStaffIds={session.role === 'manager'}
         onExportComplete={(filename) => {
           setNoticeBanner(`Downloaded Approved Leaderboard PDF (${filename}).`);
           setTimeout(() => setNoticeBanner(null), 5000);

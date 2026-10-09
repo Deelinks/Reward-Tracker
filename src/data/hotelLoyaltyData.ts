@@ -23,6 +23,9 @@ export interface StaffMemberRecord {
 
 export const MANAGER_EMAIL = 'deelinkitsolution@gmail.com';
 export const INITIAL_MANAGER_PASSWORD = 'Deelink#2026';
+// Salted SHA-256 hash of 'kimono-frontdesk-v1::Deelink#2026'
+export const INITIAL_MANAGER_PASSWORD_HASH =
+  '25be940b6ef81f1a0649e6b974999b5ff87a6a871b242c5c636120dc05194688';
 
 export const STAFF_NAMES = [
   'Busola',

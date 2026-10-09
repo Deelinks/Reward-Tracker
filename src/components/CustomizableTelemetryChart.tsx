@@ -113,7 +113,7 @@ export const CustomizableTelemetryChart: React.FC<CustomizableTelemetryChartProp
               <option value="ALL">All 11 Staff Combined</option>
               {staffRecords.map((s) => (
                 <option key={s.id} value={s.id}>
-                  {s.staffName} ({s.staffLoginId})
+                  {s.staffName}
                 </option>
               ))}
             </select>
@@ -137,9 +137,6 @@ export const CustomizableTelemetryChart: React.FC<CustomizableTelemetryChartProp
                     style={{ backgroundColor: staff.avatarColor }}
                   />
                   <span className="font-semibold text-slate-900 truncate">{staff.staffName}</span>
-                  <span className="text-xs font-mono-tabular text-slate-400 hidden sm:inline">
-                    ({staff.staffLoginId})
-                  </span>
                 </div>
 
                 <div className="col-span-5 sm:col-span-7 bg-slate-100 h-7 rounded-lg overflow-hidden relative flex items-center">

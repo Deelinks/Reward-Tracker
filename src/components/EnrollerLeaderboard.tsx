@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import {
   StaffMemberRecord
 } from '../data/hotelLoyaltyData';
-import { FirestoreActiveSessionDoc } from '../services/firebaseClient';
+import { FirestoreActiveSessionDoc, hashManagerPassword } from '../services/firebaseClient';
 import {
   ArrowUpDown,
   Calendar,
@@ -64,7 +64,7 @@ interface EnrollerLeaderboardProps {
   onUpdateStaffRole: (staffId: string, newRole: string) => void;
   onUpdateStaffMonthlyGoal: (staffId: string, newMonthlyGoal: number) => void;
   onUpdateAllStaffMonthlyGoals: (newMonthlyGoal: number) => void;
-  managerPassword: string;
+  managerPasswordHash: string;
   onChangeManagerPassword: (newPassword: string) => void;
   onClearAllEntries: () => void;
   activeSessions: FirestoreActiveSessionDoc[];
@@ -90,7 +90,7 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
   onUpdateStaffRole,
   onUpdateStaffMonthlyGoal,
   onUpdateAllStaffMonthlyGoals,
-  managerPassword,
+  managerPasswordHash,
   onChangeManagerPassword,
   onClearAllEntries,
   activeSessions
@@ -336,10 +336,11 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
     setStaffManageError(null);
   };
 
-  // Handle Manager Changing Their Own Password
-  const handleChangePasswordSubmit = (e: React.FormEvent) => {
+  // Handle Manager Changing Their Own Password (verified via salted SHA-256 hash)
+  const handleChangePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (currentPasswordInput !== managerPassword) {
+    const currentHash = await hashManagerPassword(currentPasswordInput);
+    if (currentHash !== managerPasswordHash) {
       setPasswordFormError('Current password does not match your active Manager password.');
       return;
     }
@@ -576,9 +577,12 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
                   </label>
                   <input
                     type="text"
+                    maxLength={40}
                     value={reservationNumberInput}
                     onChange={(e) => {
-                      setReservationNumberInput(e.target.value.toUpperCase());
+                      setReservationNumberInput(
+                        e.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, '')
+                      );
                       if (formError) setFormError(null);
                     }}
                     placeholder="e.g. RES-840105"

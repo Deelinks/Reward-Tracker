@@ -10,6 +10,7 @@ interface PdfReportDrawerProps {
   monthLabel: string;
   selectedDateIso: string;
   staffRecords: StaffMemberRecord[];
+  includeStaffIds?: boolean;
   onExportComplete: (filename: string) => void;
 }
 
@@ -20,6 +21,7 @@ export const PdfReportDrawer: React.FC<PdfReportDrawerProps> = ({
   monthLabel,
   selectedDateIso,
   staffRecords,
+  includeStaffIds = false,
   onExportComplete
 }) => {
   const [reportTitle, setReportTitle] = useState(
@@ -27,7 +29,7 @@ export const PdfReportDrawer: React.FC<PdfReportDrawerProps> = ({
   );
   const [preparedBy, setPreparedBy] = useState('Front Office Manager');
   const [executiveNotes, setExecutiveNotes] = useState(
-    'Busola leads the October 2026 leaderboard with 42 verified guest rewards numbers recorded across the month, followed closely by Atiku (37) and Shola (35). All 16-digit rewards numbers have been validated against duplicate entry.'
+    'Official monthly audit of verified 16-digit guest rewards numbers recorded across the front desk.'
   );
 
   if (!isOpen) return null;
@@ -41,7 +43,8 @@ export const PdfReportDrawer: React.FC<PdfReportDrawerProps> = ({
       selectedDateIso,
       preparedBy,
       executiveNotes,
-      staffRecords
+      staffRecords,
+      includeStaffIds
     });
     onExportComplete(savedFilename);
     onClose();

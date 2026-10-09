@@ -10,6 +10,7 @@ export interface PdfExportOptions {
   preparedBy: string;
   executiveNotes: string;
   staffRecords: StaffMemberRecord[];
+  includeStaffIds?: boolean;
 }
 
 export function generateManagementPdfReport(options: PdfExportOptions): string {
@@ -101,7 +102,7 @@ export function generateManagementPdfReport(options: PdfExportOptions): string {
     ],
     body: rankedStaff.map((s, idx) => [
       `#${idx + 1}`,
-      s.staffLoginId,
+      options.includeStaffIds ? s.staffLoginId : 'Protected',
       s.staffName,
       s.dayCount.toString(),
       s.monthCount.toString(),

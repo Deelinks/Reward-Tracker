@@ -16,9 +16,8 @@ import {
 } from 'firebase/firestore';
 import {
   ApprovalStatus,
-  INITIAL_MANAGER_PASSWORD,
+  INITIAL_MANAGER_PASSWORD_HASH,
   INITIAL_STAFF_RECORDS,
-  MANAGER_EMAIL,
   StaffMemberRecord
 } from '../data/hotelLoyaltyData';
 
@@ -57,6 +56,34 @@ export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 
 export const WORKSPACE_ID = 'aurelia-office';
+const PASSWORD_SALT = 'kimono-frontdesk-v1::';
+
+// Salted SHA-256 password hashing via Web Crypto API (prevents plaintext password storage or exposure)
+export async function hashManagerPassword(plainPassword: string): Promise<string> {
+  const normalized = `${PASSWORD_SALT}${plainPassword.trim()}`;
+  const msgBuffer = new TextEncoder().encode(normalized);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Sanitize text inputs against control characters, HTML tags, and script injection
+export function sanitizeText(raw: string, maxLength: number): string {
+  return raw
+    .replace(/[<>"'`\\]/g, '')
+    .replace(/[\u0000-\u001F\u007F]/g, '')
+    .trim()
+    .slice(0, maxLength);
+}
+
+// Sanitize reservation numbers strictly to alphanumeric, hyphen, and underscore characters
+export function sanitizeReservationNumber(raw: string): string {
+  return raw
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9_-]/g, '')
+    .slice(0, 40);
+}
 
 export enum OperationType {
   CREATE = 'create',
@@ -147,7 +174,7 @@ export interface FirestoreRewardEntryDoc {
 
 export interface FirestoreOfficeConfigDoc {
   workspaceId: string;
-  managerPassword: string;
+  managerPasswordHash: string;
   initialized: boolean;
 }
 
@@ -182,16 +209,16 @@ export async function registerActiveSessionInDb(
     second: '2-digit'
   });
   const payload: FirestoreActiveSessionDoc = {
-    sessionId: sessionId.slice(0, 64),
+    sessionId: sessionId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64),
     role,
-    userId: userId.slice(0, 64),
-    displayName: displayName.slice(0, 80),
-    loginIdentifier: loginIdentifier.slice(0, 80),
+    userId: sanitizeText(userId, 64),
+    displayName: sanitizeText(displayName, 80),
+    loginIdentifier: sanitizeText(loginIdentifier, 80),
     signedInAt: nowStr.slice(0, 32),
     workspaceId: WORKSPACE_ID
   };
   try {
-    await setDoc(doc(db, 'active_sessions', sessionId), payload);
+    await setDoc(doc(db, 'active_sessions', payload.sessionId), payload);
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, `active_sessions/${sessionId}`);
   }
@@ -209,7 +236,7 @@ export async function updateActiveSessionIdentifierInDb(
   });
   try {
     await updateDoc(doc(db, 'active_sessions', sessionId), {
-      loginIdentifier: newLoginIdentifier.slice(0, 80),
+      loginIdentifier: sanitizeText(newLoginIdentifier, 80),
       signedInAt: nowStr.slice(0, 32)
     });
   } catch (error) {
@@ -226,7 +253,7 @@ export async function removeActiveSessionInDb(sessionId: string): Promise<void> 
   }
 }
 
-// Seed the initial 11 staff members (with 0 entries) and default manager password if not initialized yet
+// Seed the initial 11 staff members (with 0 entries) and salted SHA-256 manager password hash if not initialized yet
 export async function ensureOfficeSeeded(): Promise<void> {
   const configPath = 'office_config/main';
   try {
@@ -237,7 +264,7 @@ export async function ensureOfficeSeeded(): Promise<void> {
       const batch = writeBatch(db);
       const initialConfig: FirestoreOfficeConfigDoc = {
         workspaceId: WORKSPACE_ID,
-        managerPassword: INITIAL_MANAGER_PASSWORD,
+        managerPasswordHash: INITIAL_MANAGER_PASSWORD_HASH,
         initialized: true
       };
       batch.set(configRef, initialConfig);
@@ -258,6 +285,21 @@ export async function ensureOfficeSeeded(): Promise<void> {
       }
 
       await batch.commit();
+    } else {
+      // Automatically migrate any legacy plaintext managerPassword document to SHA-256 hash
+      const rawData = configSnap.data() as Record<string, unknown>;
+      if (typeof rawData.managerPasswordHash !== 'string' || rawData.managerPasswordHash.length !== 64) {
+        const legacyPlain =
+          typeof rawData.managerPassword === 'string' && rawData.managerPassword.trim().length > 0
+            ? rawData.managerPassword.trim()
+            : 'Deelink#2026';
+        const migratedHash = await hashManagerPassword(legacyPlain);
+        await setDoc(configRef, {
+          workspaceId: WORKSPACE_ID,
+          managerPasswordHash: migratedHash,
+          initialized: true
+        });
+      }
     }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, configPath);
@@ -274,12 +316,14 @@ export async function createRewardEntryInDb(
   const entryId = `RWD-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
   const nowTime = new Date().toTimeString().slice(0, 8);
   const path = `reward_entries/${entryId}`;
+  const safeRes = sanitizeReservationNumber(reservationNumber);
+  const safeRewards = rewardsNumber.replace(/[^\d]/g, '').slice(0, 16);
 
   const payload: FirestoreRewardEntryDoc = {
     entryId: entryId.slice(0, 64),
-    staffId: staffId.slice(0, 64),
-    reservationNumber: reservationNumber.trim().slice(0, 40),
-    rewardsNumber: rewardsNumber.replace(/\s+/g, '').slice(0, 16),
+    staffId: staffId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64),
+    reservationNumber: safeRes,
+    rewardsNumber: safeRewards,
     dateIso: dateIso.slice(0, 10),
     timestamp: nowTime.slice(0, 12),
     status: 'pending',
@@ -293,7 +337,7 @@ export async function createRewardEntryInDb(
   }
 }
 
-// Manager approves or rejects a single reward entry
+// Manager approves or rejects a single reward entry (never exposes manager email in DB)
 export async function updateRewardEntryStatusInDb(
   entryId: string,
   decision: 'approved' | 'rejected'
@@ -302,7 +346,7 @@ export async function updateRewardEntryStatusInDb(
   try {
     await updateDoc(doc(db, 'reward_entries', entryId), {
       status: decision,
-      reviewedBy: MANAGER_EMAIL
+      reviewedBy: 'MANAGER'
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, path);
@@ -322,7 +366,7 @@ export async function approveAllPendingEntriesInDb(
         if (e.status === 'pending') {
           batch.update(doc(db, 'reward_entries', e.entryId), {
             status: 'approved',
-            reviewedBy: MANAGER_EMAIL
+            reviewedBy: 'MANAGER'
           });
           count++;
         }
@@ -362,8 +406,8 @@ export async function createStaffMemberInDb(
   const payload: FirestoreStaffDoc = {
     id,
     staffLoginId: cleanLoginId,
-    staffName: staffName.trim().slice(0, 80),
-    role: (role.trim() || 'Front Desk Associate').slice(0, 80),
+    staffName: sanitizeText(staffName, 80),
+    role: sanitizeText(role || 'Front Desk Associate', 80),
     avatarColor: color,
     monthlyGoal: safeGoal,
     dailyGoal: safeDaily,
@@ -397,7 +441,7 @@ export async function updateStaffRoleInDb(
   staffId: string,
   newRole: string
 ): Promise<void> {
-  const cleanRole = (newRole.trim() || 'Front Desk Associate').slice(0, 80);
+  const cleanRole = sanitizeText(newRole || 'Front Desk Associate', 80);
   try {
     await updateDoc(doc(db, 'staff_members', staffId), {
       role: cleanRole
@@ -445,12 +489,15 @@ export async function updateAllStaffMonthlyGoalsInDb(
   }
 }
 
-// Manager updates their unique password
+// Manager updates their unique password (stores salted SHA-256 hash only)
 export async function updateManagerPasswordInDb(newPassword: string): Promise<void> {
   const safePassword = newPassword.trim().slice(0, 64);
+  const newPasswordHash = await hashManagerPassword(safePassword);
   try {
-    await updateDoc(doc(db, 'office_config', 'main'), {
-      managerPassword: safePassword
+    await setDoc(doc(db, 'office_config', 'main'), {
+      workspaceId: WORKSPACE_ID,
+      managerPasswordHash: newPasswordHash,
+      initialized: true
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, 'office_config/main');
