@@ -151,6 +151,81 @@ export interface FirestoreOfficeConfigDoc {
   initialized: boolean;
 }
 
+export interface FirestoreActiveSessionDoc {
+  sessionId: string;
+  role: 'staff' | 'manager';
+  userId: string;
+  displayName: string;
+  loginIdentifier: string;
+  signedInAt: string;
+  workspaceId: string;
+}
+
+// Helper to ensure a Staff Login ID always begins with AUR-
+export function formatAurStaffId(raw: string): string {
+  const cleaned = raw.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '');
+  const withoutPrefix = cleaned.replace(/^AUR-?/, '');
+  return `AUR-${withoutPrefix}`.slice(0, 32);
+}
+
+// Register a user's active session across workstations
+export async function registerActiveSessionInDb(
+  sessionId: string,
+  role: 'staff' | 'manager',
+  userId: string,
+  displayName: string,
+  loginIdentifier: string
+): Promise<void> {
+  const nowStr = new Date().toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  });
+  const payload: FirestoreActiveSessionDoc = {
+    sessionId: sessionId.slice(0, 64),
+    role,
+    userId: userId.slice(0, 64),
+    displayName: displayName.slice(0, 80),
+    loginIdentifier: loginIdentifier.slice(0, 80),
+    signedInAt: nowStr.slice(0, 32),
+    workspaceId: WORKSPACE_ID
+  };
+  try {
+    await setDoc(doc(db, 'active_sessions', sessionId), payload);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, `active_sessions/${sessionId}`);
+  }
+}
+
+// Update active session loginIdentifier if staff member changes their own AUR- ID
+export async function updateActiveSessionIdentifierInDb(
+  sessionId: string,
+  newLoginIdentifier: string
+): Promise<void> {
+  const nowStr = new Date().toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  });
+  try {
+    await updateDoc(doc(db, 'active_sessions', sessionId), {
+      loginIdentifier: newLoginIdentifier.slice(0, 80),
+      signedInAt: nowStr.slice(0, 32)
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `active_sessions/${sessionId}`);
+  }
+}
+
+// Remove an active session when a user signs out or locks their workstation
+export async function removeActiveSessionInDb(sessionId: string): Promise<void> {
+  try {
+    await deleteDoc(doc(db, 'active_sessions', sessionId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `active_sessions/${sessionId}`);
+  }
+}
+
 // Seed the initial 11 staff members (with 0 entries) and default manager password if not initialized yet
 export async function ensureOfficeSeeded(): Promise<void> {
   const configPath = 'office_config/main';
@@ -282,11 +357,11 @@ export async function createStaffMemberInDb(
   const id = `STF-${Date.now()}`;
   const safeGoal = Math.min(10000, Math.max(1, Math.round(monthlyGoal)));
   const safeDaily = Math.min(1000, Math.max(1, Math.round(safeGoal / 10)));
-  const cleanLoginId = staffLoginId.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '');
+  const cleanLoginId = formatAurStaffId(staffLoginId);
 
   const payload: FirestoreStaffDoc = {
     id,
-    staffLoginId: cleanLoginId.slice(0, 32),
+    staffLoginId: cleanLoginId,
     staffName: staffName.trim().slice(0, 80),
     role: (role.trim() || 'Front Desk Associate').slice(0, 80),
     avatarColor: color,
@@ -302,15 +377,30 @@ export async function createStaffMemberInDb(
   }
 }
 
-// Manager resets or updates a staff member's Login ID
+// Manager or Staff resets or updates a staff member's Login ID (always AUR- prefixed)
 export async function updateStaffLoginIdInDb(
   staffId: string,
   newLoginId: string
 ): Promise<void> {
-  const cleanId = newLoginId.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 32);
+  const cleanId = formatAurStaffId(newLoginId);
   try {
     await updateDoc(doc(db, 'staff_members', staffId), {
       staffLoginId: cleanId
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `staff_members/${staffId}`);
+  }
+}
+
+// Manager updates a staff member's Role / Title
+export async function updateStaffRoleInDb(
+  staffId: string,
+  newRole: string
+): Promise<void> {
+  const cleanRole = (newRole.trim() || 'Front Desk Associate').slice(0, 80);
+  try {
+    await updateDoc(doc(db, 'staff_members', staffId), {
+      role: cleanRole
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, `staff_members/${staffId}`);

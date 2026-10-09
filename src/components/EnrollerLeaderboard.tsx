@@ -4,6 +4,7 @@ import {
   MANAGER_EMAIL,
   StaffMemberRecord
 } from '../data/hotelLoyaltyData';
+import { FirestoreActiveSessionDoc } from '../services/firebaseClient';
 import {
   ArrowUpDown,
   Calendar,
@@ -23,6 +24,7 @@ import {
   Trash2,
   Trophy,
   UserCheck,
+  Users,
   X
 } from 'lucide-react';
 
@@ -60,11 +62,13 @@ interface EnrollerLeaderboardProps {
     monthlyGoal: number
   ) => void;
   onUpdateStaffLoginId: (staffId: string, newLoginId: string) => void;
+  onUpdateStaffRole: (staffId: string, newRole: string) => void;
   onUpdateStaffMonthlyGoal: (staffId: string, newMonthlyGoal: number) => void;
   onUpdateAllStaffMonthlyGoals: (newMonthlyGoal: number) => void;
   managerPassword: string;
   onChangeManagerPassword: (newPassword: string) => void;
   onClearAllEntries: () => void;
+  activeSessions: FirestoreActiveSessionDoc[];
 }
 
 type SortMode = 'monthTotal' | 'dayTotal' | 'pendingCount';
@@ -84,16 +88,18 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
   onManagerApproveAll,
   onCreateStaffMember,
   onUpdateStaffLoginId,
+  onUpdateStaffRole,
   onUpdateStaffMonthlyGoal,
   onUpdateAllStaffMonthlyGoals,
   managerPassword,
   onChangeManagerPassword,
-  onClearAllEntries
+  onClearAllEntries,
+  activeSessions
 }) => {
-  // Manager Console Active Tab ('approvals' | 'manageStaff' | 'security')
-  const [managerTab, setManagerTab] = useState<'approvals' | 'manageStaff' | 'security'>(
-    'approvals'
-  );
+  // Manager Console Active Tab ('approvals' | 'manageStaff' | 'signedInUsers' | 'security')
+  const [managerTab, setManagerTab] = useState<
+    'approvals' | 'manageStaff' | 'signedInUsers' | 'security'
+  >('approvals');
 
   // Create Staff & Goal Management State
   const [newStaffName, setNewStaffName] = useState<string>('');
@@ -103,6 +109,8 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
   const [staffManageError, setStaffManageError] = useState<string | null>(null);
   const [editingStaffId, setEditingStaffId] = useState<string | null>(null);
   const [editingLoginIdValue, setEditingLoginIdValue] = useState<string>('');
+  const [editingRoleStaffId, setEditingRoleStaffId] = useState<string | null>(null);
+  const [editingRoleValue, setEditingRoleValue] = useState<string>('');
   const [editingGoalStaffId, setEditingGoalStaffId] = useState<string | null>(null);
   const [editingGoalValue, setEditingGoalValue] = useState<number>(40);
   const [bulkMonthlyGoalInput, setBulkMonthlyGoalInput] = useState<number>(45);
@@ -113,6 +121,11 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
   const [confirmPasswordInput, setConfirmPasswordInput] = useState<string>('');
   const [passwordFormError, setPasswordFormError] = useState<string | null>(null);
   const [confirmClearAll, setConfirmClearAll] = useState<boolean>(false);
+
+  // Staff Self-Service Change Unique ID State (must use AUR- prefix)
+  const [isStaffChangingOwnId, setIsStaffChangingOwnId] = useState<boolean>(false);
+  const [staffCustomSuffixInput, setStaffCustomSuffixInput] = useState<string>('');
+  const [staffOwnIdError, setStaffOwnIdError] = useState<string | null>(null);
 
   // Staff Rewards Number Entry State (Reservation Number + 16-digit Rewards Number)
   const [reservationNumberInput, setReservationNumberInput] = useState<string>('');
@@ -186,11 +199,45 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
     setExpandedStaffId(session.staffId);
   };
 
+  // Handle Logged-in Staff Member Changing Their Own Unique ID (with mandatory AUR- prefix)
+  const handleStaffSaveOwnId = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (session.role !== 'staff') return;
+
+    const cleanSuffix = staffCustomSuffixInput
+      .trim()
+      .toUpperCase()
+      .replace(/^AUR-?/, '')
+      .replace(/[^A-Z0-9_-]/g, '');
+
+    if (!cleanSuffix) {
+      setStaffOwnIdError('Please enter your new ID code after the AUR- prefix.');
+      return;
+    }
+
+    const fullNewId = `AUR-${cleanSuffix}`;
+    const duplicate = staffRecords.some(
+      (s) => s.id !== session.staffId && s.staffLoginId.toUpperCase() === fullNewId
+    );
+    if (duplicate) {
+      setStaffOwnIdError(
+        `Staff ID "${fullNewId}" is already in use by another staff member. Please choose a different code.`
+      );
+      return;
+    }
+
+    setStaffOwnIdError(null);
+    onUpdateStaffLoginId(session.staffId, fullNewId);
+    setIsStaffChangingOwnId(false);
+    setStaffCustomSuffixInput('');
+  };
+
   // Handle Manager Creating a New Staff Member & Login ID
   const handleCreateStaffSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const cleanName = newStaffName.trim();
-    const cleanLoginId = newStaffLoginId.trim().toUpperCase();
+    const rawId = newStaffLoginId.trim().toUpperCase().replace(/^AUR-?/, '').replace(/[^A-Z0-9_-]/g, '');
+    const cleanLoginId = rawId ? `AUR-${rawId}` : '';
     const cleanRole = newStaffRole.trim() || 'Front Desk Associate';
 
     if (!cleanName) {
@@ -198,7 +245,7 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
       return;
     }
     if (!cleanLoginId) {
-      setStaffManageError('Please enter a unique Login ID for this staff member (e.g., AUR-112).');
+      setStaffManageError('Please enter a unique Login ID with the AUR- prefix.');
       return;
     }
 
@@ -228,11 +275,16 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
 
   // Handle Manager Saving a Custom or Reset Staff Login ID
   const handleSaveEditedLoginId = (staffId: string) => {
-    const cleanLoginId = editingLoginIdValue.trim().toUpperCase();
-    if (!cleanLoginId) {
-      setStaffManageError('Staff Login ID cannot be empty.');
+    const rawSuffix = editingLoginIdValue
+      .trim()
+      .toUpperCase()
+      .replace(/^AUR-?/, '')
+      .replace(/[^A-Z0-9_-]/g, '');
+    if (!rawSuffix) {
+      setStaffManageError('Staff Login ID must have a valid code after AUR-.');
       return;
     }
+    const cleanLoginId = `AUR-${rawSuffix}`;
     const duplicate = staffRecords.some(
       (s) => s.id !== staffId && s.staffLoginId.toUpperCase() === cleanLoginId
     );
@@ -399,7 +451,7 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
       {/* SECTION 1: ACTIVE ROLE WORKSPACE (STAFF SUBMISSION OR MANAGER CONTROL CENTER) */}
       <section className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs">
         {session.role === 'staff' ? (
-          /* LOGGED-IN STAFF WORKSPACE: SUBMIT RESERVATION NUMBER & REWARDS NUMBER */
+          /* LOGGED-IN STAFF WORKSPACE: SUBMIT RESERVATION NUMBER & REWARDS NUMBER + CHANGE OWN AUR- ID */
           <div>
             <div className="bg-indigo-950 text-white px-6 py-4 flex flex-wrap items-center justify-between gap-4">
               <div className="flex items-center gap-3">
@@ -417,15 +469,95 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={onLogout}
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold bg-white/10 hover:bg-white/20 text-white rounded-lg cursor-pointer"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-                <span>Sign Out</span>
-              </button>
+              <div className="flex items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsStaffChangingOwnId(!isStaffChangingOwnId);
+                    setStaffCustomSuffixInput(
+                      session.staffLoginId.replace(/^AUR-?/i, '')
+                    );
+                    setStaffOwnIdError(null);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold bg-amber-400 hover:bg-amber-500 text-slate-950 rounded-lg cursor-pointer transition-colors"
+                >
+                  <KeyRound className="w-3.5 h-3.5" />
+                  <span>{isStaffChangingOwnId ? 'Close ID Editor' : 'Change My Staff ID'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={onLogout}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold bg-white/10 hover:bg-white/20 text-white rounded-lg cursor-pointer"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span>Sign Out</span>
+                </button>
+              </div>
             </div>
+
+            {isStaffChangingOwnId && (
+              <div className="bg-indigo-50/90 border-b border-indigo-200 px-6 py-4">
+                <form
+                  onSubmit={handleStaffSaveOwnId}
+                  className="flex flex-col sm:flex-row sm:items-end justify-between gap-4"
+                >
+                  <div>
+                    <div className="text-sm font-bold text-indigo-950 flex items-center gap-2">
+                      <KeyRound className="w-4 h-4 text-indigo-700" />
+                      <span>Change Your Unique Staff ID (Fixed AUR- Prefix)</span>
+                    </div>
+                    <p className="text-xs text-slate-600 mt-0.5">
+                      Your Staff ID always starts with <strong className="font-mono-tabular">AUR-</strong>. Enter your preferred characters or numbers after the prefix.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <div className="flex items-center rounded-lg border border-indigo-300 bg-white overflow-hidden">
+                      <span className="px-3 py-2 bg-indigo-900 text-amber-300 font-mono-tabular text-sm font-bold select-none">
+                        AUR-
+                      </span>
+                      <input
+                        type="text"
+                        maxLength={24}
+                        value={staffCustomSuffixInput}
+                        onChange={(e) => {
+                          setStaffCustomSuffixInput(
+                            e.target.value.toUpperCase().replace(/^AUR-?/, '').replace(/[^A-Z0-9_-]/g, '')
+                          );
+                          setStaffOwnIdError(null);
+                        }}
+                        placeholder="Enter new code"
+                        className="w-36 px-3 py-2 text-sm font-mono-tabular font-bold text-slate-900 focus:outline-none"
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      className="px-4 py-2 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg cursor-pointer"
+                    >
+                      Save New ID
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsStaffChangingOwnId(false);
+                        setStaffOwnIdError(null);
+                      }}
+                      className="px-3 py-2 text-xs font-semibold bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-lg cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+
+                {staffOwnIdError && (
+                  <p className="mt-2.5 text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 px-3 py-2 rounded-lg">
+                    {staffOwnIdError}
+                  </p>
+                )}
+              </div>
+            )}
 
             <form onSubmit={handleStaffRewardSubmit} className="p-6">
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
@@ -568,6 +700,17 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
                     }`}
                   >
                     Staff IDs &amp; Monthly Goals ({staffRecords.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setManagerTab('signedInUsers')}
+                    className={`px-3 py-1.5 text-xs font-semibold rounded-md cursor-pointer transition-colors ${
+                      managerTab === 'signedInUsers'
+                        ? 'bg-amber-400 text-slate-950'
+                        : 'text-emerald-100 hover:text-white'
+                    }`}
+                  >
+                    Signed-In Users ({activeSessions.length})
                   </button>
                   <button
                     type="button"
@@ -809,12 +952,13 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
                 {/* Directory of All Staff with Instant Reset ID, Custom Edit ID, and Individual Monthly Goal Editor */}
                 <div>
                   <div className="text-xs font-semibold text-slate-700 mb-2.5">
-                    Active Staff Roster · Edit Individual Monthly Goals &amp; Reset Staff Login IDs (
+                    Active Staff Roster · Edit Staff Roles, Individual Monthly Goals &amp; Reset Staff Login IDs (
                     {staffRecords.length} Staff):
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {staffRecords.map((s) => {
                       const isEditingId = editingStaffId === s.id;
+                      const isEditingRole = editingRoleStaffId === s.id;
                       const isEditingGoal = editingGoalStaffId === s.id;
                       return (
                         <div
@@ -825,7 +969,58 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
                             <div className="font-semibold text-slate-900 text-sm truncate">
                               {s.staffName}
                             </div>
-                            <div className="text-xs text-slate-500 truncate">{s.role}</div>
+                            {isEditingRole ? (
+                              <div className="mt-1 flex items-center gap-1 bg-slate-50 p-1 rounded border border-slate-300">
+                                <input
+                                  type="text"
+                                  maxLength={80}
+                                  value={editingRoleValue}
+                                  onChange={(e) => setEditingRoleValue(e.target.value)}
+                                  placeholder="Enter staff role..."
+                                  className="w-40 px-2 py-0.5 text-xs font-medium border border-slate-300 rounded bg-white text-slate-900 focus:outline-none focus:border-indigo-600"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const cleanRole = editingRoleValue.trim();
+                                    if (!cleanRole) {
+                                      setStaffManageError('Staff role cannot be empty.');
+                                      return;
+                                    }
+                                    setStaffManageError(null);
+                                    onUpdateStaffRole(s.id, cleanRole);
+                                    setEditingRoleStaffId(null);
+                                    setEditingRoleValue('');
+                                  }}
+                                  className="px-2 py-0.5 text-xs font-semibold bg-emerald-600 text-white rounded cursor-pointer"
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingRoleStaffId(null)}
+                                  className="px-1.5 py-0.5 text-xs font-semibold text-slate-600 cursor-pointer"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-1.5 mt-0.5">
+                                <span className="text-xs text-slate-500 truncate">{s.role}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingRoleStaffId(s.id);
+                                    setEditingRoleValue(s.role);
+                                    setStaffManageError(null);
+                                  }}
+                                  title="Click to edit this staff member's Role"
+                                  className="text-[11px] font-semibold text-indigo-700 hover:underline cursor-pointer shrink-0"
+                                >
+                                  Edit Role ✎
+                                </button>
+                              </div>
+                            )}
                           </div>
 
                           <div className="flex flex-wrap items-center gap-2 shrink-0">
@@ -928,6 +1123,59 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
                     })}
                   </div>
                 </div>
+              </div>
+            )}
+
+            {managerTab === 'signedInUsers' && (
+              <div className="p-6">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+                  <div>
+                    <div className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                      <Users className="w-4 h-4 text-emerald-600" />
+                      <span>Currently Signed-In Users Across Workstations ({activeSessions.length})</span>
+                    </div>
+                    <p className="text-xs text-slate-600 mt-0.5">
+                      Live list of all Staff and Manager sessions currently signed in. Updates
+                      automatically when a user signs in or signs out.
+                    </p>
+                  </div>
+                </div>
+
+                {activeSessions.length === 0 ? (
+                  <div className="py-6 text-center bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-600">
+                    No active user sessions detected right now.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {activeSessions.map((act) => (
+                      <div
+                        key={act.sessionId}
+                        className="p-4 rounded-xl border border-emerald-200 bg-emerald-50/40 flex items-center justify-between gap-3"
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
+                            <span className="font-bold text-slate-900 text-sm truncate">
+                              {act.displayName}
+                            </span>
+                            <span
+                              className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${
+                                act.role === 'manager'
+                                  ? 'bg-amber-200 text-amber-950'
+                                  : 'bg-indigo-100 text-indigo-900'
+                              }`}
+                            >
+                              {act.role}
+                            </span>
+                          </div>
+                          <div className="mt-1 text-xs text-slate-600 font-mono-tabular">
+                            ID: <strong className="text-slate-900">{act.loginIdentifier}</strong> · Signed in at {act.signedInAt}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 

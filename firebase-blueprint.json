@@ -13,10 +13,10 @@
         },
         "staffLoginId": {
           "type": "string",
-          "minLength": 2,
+          "minLength": 5,
           "maxLength": 32,
-          "pattern": "^[a-zA-Z0-9_\\-]+$",
-          "description": "Unique manager-issued staff login ID (e.g. AUR-101)"
+          "pattern": "^AUR-[a-zA-Z0-9_\\-]+$",
+          "description": "Unique staff login ID starting with AUR- (e.g. AUR-101)"
         },
         "staffName": {
           "type": "string",
@@ -156,6 +156,63 @@
         }
       },
       "required": ["workspaceId", "managerPassword", "initialized"]
+    },
+    "ActiveSession": {
+      "title": "ActiveSession",
+      "description": "Real-time record of a user currently signed in on a workstation.",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Unique workstation session identifier"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["staff", "manager"],
+          "description": "Role of the signed-in user"
+        },
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Staff ID (e.g. STF-01) or 'MANAGER'"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Staff member name or Manager email"
+        },
+        "loginIdentifier": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80,
+          "description": "Staff Login ID (e.g. AUR-101) or Manager email"
+        },
+        "signedInAt": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 32,
+          "description": "Human-readable sign-in time"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 32,
+          "description": "Shared office workspace identifier (aurelia-office)"
+        }
+      },
+      "required": [
+        "sessionId",
+        "role",
+        "userId",
+        "displayName",
+        "loginIdentifier",
+        "signedInAt",
+        "workspaceId"
+      ]
     }
   },
   "firestore": {
@@ -170,6 +227,10 @@
     "/office_config/{configId}": {
       "schema": { "$ref": "#/entities/OfficeConfig" },
       "description": "Office configuration document (configId = 'main')"
+    },
+    "/active_sessions/{sessionId}": {
+      "schema": { "$ref": "#/entities/ActiveSession" },
+      "description": "Users currently signed in across workstations"
     }
   }
 }

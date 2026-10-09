@@ -41,7 +41,7 @@ service cloud.firestore {
           'workspaceId'
         ]) &&
         data.id is string && data.id.size() >= 1 && data.id.size() <= 64 && data.id.matches('^[a-zA-Z0-9_\\-]+$') &&
-        data.staffLoginId is string && data.staffLoginId.size() >= 2 && data.staffLoginId.size() <= 32 && data.staffLoginId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.staffLoginId is string && data.staffLoginId.size() >= 5 && data.staffLoginId.size() <= 32 && data.staffLoginId.matches('^AUR-[a-zA-Z0-9_\\-]+$') &&
         data.staffName is string && data.staffName.size() >= 1 && data.staffName.size() <= 80 &&
         data.role is string && data.role.size() >= 1 && data.role.size() <= 80 &&
         data.avatarColor is string && data.avatarColor.size() >= 4 && data.avatarColor.size() <= 16 &&
@@ -91,6 +91,34 @@ service cloud.firestore {
         data.initialized is bool;
     }
 
+    function isValidActiveSession(data) {
+      return data.keys().hasAll([
+          'sessionId',
+          'role',
+          'userId',
+          'displayName',
+          'loginIdentifier',
+          'signedInAt',
+          'workspaceId'
+        ]) &&
+        data.keys().hasOnly([
+          'sessionId',
+          'role',
+          'userId',
+          'displayName',
+          'loginIdentifier',
+          'signedInAt',
+          'workspaceId'
+        ]) &&
+        data.sessionId is string && data.sessionId.size() >= 1 && data.sessionId.size() <= 64 && data.sessionId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.role is string && (data.role == 'staff' || data.role == 'manager') &&
+        data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 64 &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 80 &&
+        data.loginIdentifier is string && data.loginIdentifier.size() >= 2 && data.loginIdentifier.size() <= 80 &&
+        data.signedInAt is string && data.signedInAt.size() >= 5 && data.signedInAt.size() <= 32 &&
+        data.workspaceId is string && data.workspaceId == 'aurelia-office';
+    }
+
     match /test/{docId} {
       allow get: if isValidId(docId);
     }
@@ -117,6 +145,7 @@ service cloud.firestore {
         incoming().workspaceId == existing().workspaceId &&
         (
           incoming().diff(existing()).affectedKeys().hasOnly(['staffLoginId']) ||
+          incoming().diff(existing()).affectedKeys().hasOnly(['role']) ||
           incoming().diff(existing()).affectedKeys().hasOnly(['monthlyGoal', 'dailyGoal'])
         );
       allow delete: if isValidId(staffId) && existing().workspaceId == 'aurelia-office';
@@ -141,6 +170,20 @@ service cloud.firestore {
         incoming().workspaceId == existing().workspaceId &&
         incoming().diff(existing()).affectedKeys().hasOnly(['status', 'reviewedBy']);
       allow delete: if isValidId(entryId) && existing().workspaceId == 'aurelia-office';
+    }
+
+    match /active_sessions/{sessionId} {
+      allow get: if isValidId(sessionId) && existing().workspaceId == 'aurelia-office';
+      allow list: if existing().workspaceId == 'aurelia-office';
+      allow create: if isValidId(sessionId) &&
+        isValidActiveSession(incoming()) &&
+        incoming().sessionId == sessionId;
+      allow update: if isValidActiveSession(incoming()) &&
+        isValidId(sessionId) &&
+        incoming().sessionId == existing().sessionId &&
+        incoming().workspaceId == existing().workspaceId &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['loginIdentifier', 'signedInAt']);
+      allow delete: if isValidId(sessionId) && existing().workspaceId == 'aurelia-office';
     }
   }
 }

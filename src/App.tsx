@@ -21,16 +21,22 @@ import {
   createStaffMemberInDb,
   db,
   ensureOfficeSeeded,
+  FirestoreActiveSessionDoc,
   FirestoreOfficeConfigDoc,
   FirestoreRewardEntryDoc,
   FirestoreStaffDoc,
+  formatAurStaffId,
   handleFirestoreError,
   OperationType,
+  registerActiveSessionInDb,
+  removeActiveSessionInDb,
+  updateActiveSessionIdentifierInDb,
   updateAllStaffMonthlyGoalsInDb,
   updateManagerPasswordInDb,
   updateRewardEntryStatusInDb,
   updateStaffLoginIdInDb,
   updateStaffMonthlyGoalInDb,
+  updateStaffRoleInDb,
   WORKSPACE_ID
 } from './services/firebaseClient';
 import { AuthGatePage } from './components/AuthGatePage';
@@ -61,8 +67,12 @@ export default function App() {
     }))
   );
   const [rewardEntries, setRewardEntries] = useState<FirestoreRewardEntryDoc[]>([]);
+  const [activeSessions, setActiveSessions] = useState<FirestoreActiveSessionDoc[]>([]);
   const [managerPassword, setManagerPassword] = useState<string>(INITIAL_MANAGER_PASSWORD);
   const [session, setSession] = useState<AuthenticatedSession | null>(null);
+  const [workstationSessionId] = useState<string>(
+    () => `SESS-${Date.now()}-${Math.floor(Math.random() * 10000)}`
+  );
 
   const [selectedMonthKey, setSelectedMonthKey] = useState<string>('2026-10');
   const [selectedDateIso, setSelectedDateIso] = useState<string>('2026-10-08');
@@ -75,6 +85,7 @@ export default function App() {
     let unsubConfig: (() => void) | undefined;
     let unsubStaff: (() => void) | undefined;
     let unsubEntries: (() => void) | undefined;
+    let unsubSessions: (() => void) | undefined;
 
     ensureOfficeSeeded()
       .then(() => {
@@ -135,17 +146,41 @@ export default function App() {
             handleFirestoreError(error, OperationType.LIST, 'reward_entries');
           }
         );
+
+        // 4. Listen to Currently Signed-In Users across workstations
+        const sessionsQuery = query(
+          collection(db, 'active_sessions'),
+          where('workspaceId', '==', WORKSPACE_ID)
+        );
+        unsubSessions = onSnapshot(
+          sessionsQuery,
+          (snap) => {
+            const loadedSessions: FirestoreActiveSessionDoc[] = [];
+            snap.forEach((d) => loadedSessions.push(d.data() as FirestoreActiveSessionDoc));
+            setActiveSessions(loadedSessions);
+          },
+          (error) => {
+            handleFirestoreError(error, OperationType.LIST, 'active_sessions');
+          }
+        );
       })
       .catch((err) => {
         console.error('Initialization error:', err);
       });
 
+    const handleBeforeUnload = () => {
+      removeActiveSessionInDb(workstationSessionId).catch(() => {});
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
     return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
       if (unsubConfig) unsubConfig();
       if (unsubStaff) unsubStaff();
       if (unsubEntries) unsubEntries();
+      if (unsubSessions) unsubSessions();
     };
-  }, []);
+  }, [workstationSessionId]);
 
   // Combine staff documents + reward entry documents into StaffMemberRecord[]
   const staffRecords: StaffMemberRecord[] = staffDocs.map((s) => {
@@ -173,21 +208,76 @@ export default function App() {
     };
   });
 
+  const handleSignOut = async () => {
+    setSession(null);
+    await removeActiveSessionInDb(workstationSessionId);
+  };
+
+  // Automatically return to the Auth page if the app is idle for 15 minutes
+  useEffect(() => {
+    if (!session) return;
+
+    const IDLE_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
+    let idleTimer: ReturnType<typeof setTimeout>;
+
+    const resetIdleTimer = () => {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        setSession(null);
+        removeActiveSessionInDb(workstationSessionId).catch(() => {});
+      }, IDLE_TIMEOUT_MS);
+    };
+
+    const activityEvents = [
+      'mousemove',
+      'mousedown',
+      'keydown',
+      'touchstart',
+      'scroll',
+      'click'
+    ];
+    activityEvents.forEach((evt) =>
+      window.addEventListener(evt, resetIdleTimer, { passive: true })
+    );
+    resetIdleTimer();
+
+    return () => {
+      clearTimeout(idleTimer);
+      activityEvents.forEach((evt) => window.removeEventListener(evt, resetIdleTimer));
+    };
+  }, [session, workstationSessionId]);
+
   // Full-Screen Auth Gate: No user can access the app until authenticated
   if (!session) {
     return (
       <AuthGatePage
         staffRecords={staffRecords}
         managerPassword={managerPassword}
-        onAuthenticatedStaff={(staff) =>
+        onAuthenticatedStaff={async (staff) => {
           setSession({
             role: 'staff',
             staffId: staff.id,
             staffName: staff.staffName,
             staffLoginId: staff.staffLoginId
-          })
-        }
-        onAuthenticatedManager={(email) => setSession({ role: 'manager', email })}
+          });
+          await registerActiveSessionInDb(
+            workstationSessionId,
+            'staff',
+            staff.id,
+            staff.staffName,
+            staff.staffLoginId
+          );
+        }}
+        onAuthenticatedManager={async (email) => {
+          setSession({ role: 'manager', email });
+          await registerActiveSessionInDb(
+            workstationSessionId,
+            'manager',
+            'MANAGER',
+            'Manager',
+            email
+          );
+        }}
       />
     );
   }
@@ -282,15 +372,34 @@ export default function App() {
     setTimeout(() => setNoticeBanner(null), 5000);
   };
 
-  // Manager Resets or Updates an Existing Staff Member's Login ID in Firestore
+  // Manager or Staff Resets/Updates an Existing Staff Member's Login ID (with AUR- prefix) in Firestore
   const handleUpdateStaffLoginId = async (staffId: string, newLoginId: string) => {
-    const cleanId = newLoginId.toUpperCase();
+    const cleanId = formatAurStaffId(newLoginId);
     const target = staffRecords.find((s) => s.id === staffId);
     await updateStaffLoginIdInDb(staffId, cleanId);
+
+    if (session.role === 'staff' && session.staffId === staffId) {
+      setSession({
+        ...session,
+        staffLoginId: cleanId
+      });
+      await updateActiveSessionIdentifierInDb(workstationSessionId, cleanId);
+    }
+
     setNoticeBanner(
-      `Staff Login ID for ${target?.staffName || 'staff member'} has been reset/updated to "${cleanId}" across all workstations.`
+      `Staff Login ID for ${target?.staffName || 'staff member'} has been updated to "${cleanId}" across all workstations.`
     );
     setTimeout(() => setNoticeBanner(null), 5000);
+  };
+
+  // Manager Updates Role / Title for a Staff Member in Firestore
+  const handleUpdateStaffRole = async (staffId: string, newRole: string) => {
+    const target = staffRecords.find((s) => s.id === staffId);
+    await updateStaffRoleInDb(staffId, newRole);
+    setNoticeBanner(
+      `Updated role for ${target?.staffName || 'staff member'} to "${newRole}" across all workstations.`
+    );
+    setTimeout(() => setNoticeBanner(null), 4000);
   };
 
   // Manager Updates Monthly Goal for a Single Staff Member in Firestore
@@ -430,7 +539,7 @@ export default function App() {
 
           <button
             type="button"
-            onClick={() => setSession(null)}
+            onClick={handleSignOut}
             className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
           >
             <LogOut className="w-3.5 h-3.5" />
@@ -541,7 +650,7 @@ export default function App() {
         <EnrollerLeaderboard
           staffRecords={staffRecords}
           session={session}
-          onLogout={() => setSession(null)}
+          onLogout={handleSignOut}
           selectedMonthKey={selectedMonthKey}
           selectedMonthLabel={currentMonthMeta.label}
           daysInMonth={currentMonthMeta.daysInMonth}
@@ -554,11 +663,13 @@ export default function App() {
           onManagerApproveAll={handleManagerApproveAll}
           onCreateStaffMember={handleCreateStaffMember}
           onUpdateStaffLoginId={handleUpdateStaffLoginId}
+          onUpdateStaffRole={handleUpdateStaffRole}
           onUpdateStaffMonthlyGoal={handleUpdateStaffMonthlyGoal}
           onUpdateAllStaffMonthlyGoals={handleUpdateAllStaffMonthlyGoals}
           managerPassword={managerPassword}
           onChangeManagerPassword={handleChangeManagerPassword}
           onClearAllEntries={handleClearAllEntries}
+          activeSessions={activeSessions}
         />
 
         {/* Visual Bar & Daily Trend Chart */}
