@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { MANAGER_EMAIL, StaffMemberRecord } from '../data/hotelLoyaltyData';
+import { INITIAL_MANAGER_PASSWORD, MANAGER_EMAIL, StaffMemberRecord } from '../data/hotelLoyaltyData';
 import { KeyRound, Lock, ShieldCheck, UserCheck, Users } from 'lucide-react';
 
 interface AuthGatePageProps {
@@ -161,7 +161,7 @@ export const AuthGatePage: React.FC<AuthGatePageProps> = ({
                       setStaffIdInput(e.target.value.toUpperCase());
                       setErrorMsg(null);
                     }}
-                    placeholder="Enter your Staff ID (e.g. AUR-101)"
+                    placeholder="Enter your Staff ID"
                     className="w-full pl-10 pr-3.5 py-2.5 text-sm font-mono-tabular font-semibold border border-slate-300 rounded-lg bg-white text-slate-900 focus:outline-none focus:border-indigo-600"
                   />
                 </div>
@@ -240,16 +240,18 @@ export const AuthGatePage: React.FC<AuthGatePageProps> = ({
                   <label className="text-xs font-semibold text-slate-700">
                     Unique Manager Password
                   </label>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setManagerPasswordInput(managerPassword);
-                      setErrorMsg(null);
-                    }}
-                    className="text-[11px] font-semibold text-amber-700 hover:underline cursor-pointer"
-                  >
-                    Fill Current Password ({managerPassword})
-                  </button>
+                  {managerPassword === INITIAL_MANAGER_PASSWORD && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setManagerPasswordInput(managerPassword);
+                        setErrorMsg(null);
+                      }}
+                      className="text-[11px] font-semibold text-amber-700 hover:underline cursor-pointer"
+                    >
+                      Fill Current Password ({managerPassword})
+                    </button>
+                  )}
                 </div>
                 <div className="relative">
                   <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
