@@ -71,9 +71,10 @@ export default function App() {
     INITIAL_MANAGER_PASSWORD_HASH
   );
   const [session, setSession] = useState<AuthenticatedSession | null>(null);
-  const [workstationSessionId] = useState<string>(
+  const [workstationSessionId, setWorkstationSessionId] = useState<string>(
     () => `SESS-${Date.now()}-${Math.floor(Math.random() * 10000)}`
   );
+  const [isSessionRegistered, setIsSessionRegistered] = useState<boolean>(false);
 
   const [selectedMonthKey, setSelectedMonthKey] = useState<string>('2026-10');
   const [selectedDateIso, setSelectedDateIso] = useState<string>('2026-10-08');
@@ -210,9 +211,23 @@ export default function App() {
   });
 
   const handleSignOut = async () => {
+    const idToRemove = workstationSessionId;
+    setIsSessionRegistered(false);
     setSession(null);
-    await removeActiveSessionInDb(workstationSessionId);
+    setWorkstationSessionId(`SESS-${Date.now()}-${Math.floor(Math.random() * 10000)}`);
+    await removeActiveSessionInDb(idToRemove);
   };
+
+  // Detect if the Manager remotely signed out this workstation's active session
+  useEffect(() => {
+    if (!session || !isSessionRegistered) return;
+    const stillActive = activeSessions.some((s) => s.sessionId === workstationSessionId);
+    if (!stillActive) {
+      setIsSessionRegistered(false);
+      setSession(null);
+      setWorkstationSessionId(`SESS-${Date.now()}-${Math.floor(Math.random() * 10000)}`);
+    }
+  }, [activeSessions, session, isSessionRegistered, workstationSessionId]);
 
   // Automatically return to the Auth page if the app is idle for 15 minutes
   useEffect(() => {
@@ -224,8 +239,11 @@ export default function App() {
     const resetIdleTimer = () => {
       clearTimeout(idleTimer);
       idleTimer = setTimeout(() => {
+        const idToRemove = workstationSessionId;
+        setIsSessionRegistered(false);
         setSession(null);
-        removeActiveSessionInDb(workstationSessionId).catch(() => {});
+        setWorkstationSessionId(`SESS-${Date.now()}-${Math.floor(Math.random() * 10000)}`);
+        removeActiveSessionInDb(idToRemove).catch(() => {});
       }, IDLE_TIMEOUT_MS);
     };
 
@@ -268,6 +286,7 @@ export default function App() {
             staff.staffName,
             staff.staffLoginId
           );
+          setIsSessionRegistered(true);
         }}
         onAuthenticatedManager={async (email) => {
           setSession({ role: 'manager', email });
@@ -278,6 +297,7 @@ export default function App() {
             'Manager',
             'MANAGER'
           );
+          setIsSessionRegistered(true);
         }}
       />
     );
@@ -437,6 +457,19 @@ export default function App() {
     await clearAllRewardEntriesInDb();
     setNoticeBanner(
       'All recorded reward entries have been cleared across all workstations. Every staff member is now at 0.'
+    );
+    setTimeout(() => setNoticeBanner(null), 5000);
+  };
+
+  // Manager Remotely Signs Out Another User Session Across Workstations
+  const handleManagerForceSignOutUser = async (targetSession: FirestoreActiveSessionDoc) => {
+    if (targetSession.sessionId === workstationSessionId) {
+      await handleSignOut();
+      return;
+    }
+    await removeActiveSessionInDb(targetSession.sessionId);
+    setNoticeBanner(
+      `Signed out ${targetSession.displayName} remotely. Their workstation has been returned to the Sign-In screen.`
     );
     setTimeout(() => setNoticeBanner(null), 5000);
   };
@@ -672,6 +705,8 @@ export default function App() {
           onChangeManagerPassword={handleChangeManagerPassword}
           onClearAllEntries={handleClearAllEntries}
           activeSessions={activeSessions}
+          currentWorkstationSessionId={workstationSessionId}
+          onForceSignOutSession={handleManagerForceSignOutUser}
         />
 
         {/* Visual Bar & Daily Trend Chart */}

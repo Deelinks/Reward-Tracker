@@ -68,6 +68,8 @@ interface EnrollerLeaderboardProps {
   onChangeManagerPassword: (newPassword: string) => void;
   onClearAllEntries: () => void;
   activeSessions: FirestoreActiveSessionDoc[];
+  currentWorkstationSessionId: string;
+  onForceSignOutSession: (targetSession: FirestoreActiveSessionDoc) => void;
 }
 
 type SortMode = 'monthTotal' | 'dayTotal' | 'pendingCount';
@@ -93,7 +95,9 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
   managerPasswordHash,
   onChangeManagerPassword,
   onClearAllEntries,
-  activeSessions
+  activeSessions,
+  currentWorkstationSessionId,
+  onForceSignOutSession
 }) => {
   // Manager Console Active Tab ('approvals' | 'manageStaff' | 'signedInUsers' | 'security')
   const [managerTab, setManagerTab] = useState<
@@ -1146,38 +1150,60 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {activeSessions.map((act) => (
-                      <div
-                        key={act.sessionId}
-                        className="p-4 rounded-xl border border-emerald-200 bg-emerald-50/40 flex items-center justify-between gap-3"
-                      >
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
-                            <span className="font-bold text-slate-900 text-sm truncate">
-                              {act.displayName}
-                            </span>
-                            <span
-                              className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${
-                                act.role === 'manager'
-                                  ? 'bg-amber-200 text-amber-950'
-                                  : 'bg-indigo-100 text-indigo-900'
-                              }`}
-                            >
-                              {act.role}
-                            </span>
+                    {activeSessions.map((act) => {
+                      const isCurrentWorkstation = act.sessionId === currentWorkstationSessionId;
+                      return (
+                        <div
+                          key={act.sessionId}
+                          className="p-4 rounded-xl border border-emerald-200 bg-emerald-50/40 flex items-center justify-between gap-3"
+                        >
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
+                              <span className="font-bold text-slate-900 text-sm truncate">
+                                {act.displayName}
+                              </span>
+                              <span
+                                className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${
+                                  act.role === 'manager'
+                                    ? 'bg-amber-200 text-amber-950'
+                                    : 'bg-indigo-100 text-indigo-900'
+                                }`}
+                              >
+                                {act.role}
+                              </span>
+                              {isCurrentWorkstation && (
+                                <span className="text-[10px] font-semibold text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded">
+                                  You
+                                </span>
+                              )}
+                            </div>
+                            <div className="mt-1 text-xs text-slate-600 font-mono-tabular">
+                              {act.role === 'staff' ? (
+                                <>
+                                  ID: <strong className="text-slate-900">{act.loginIdentifier}</strong> ·{' '}
+                                </>
+                              ) : null}
+                              Signed in at {act.signedInAt}
+                            </div>
                           </div>
-                          <div className="mt-1 text-xs text-slate-600 font-mono-tabular">
-                            {act.role === 'staff' ? (
-                              <>
-                                ID: <strong className="text-slate-900">{act.loginIdentifier}</strong> ·{' '}
-                              </>
-                            ) : null}
-                            Signed in at {act.signedInAt}
-                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => onForceSignOutSession(act)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-rose-700 bg-white hover:bg-rose-50 border border-rose-300 rounded-lg transition-colors cursor-pointer shrink-0"
+                            title={
+                              isCurrentWorkstation
+                                ? 'Sign out your current session'
+                                : `Remotely sign out ${act.displayName}`
+                            }
+                          >
+                            <LogOut className="w-3.5 h-3.5" />
+                            <span>{isCurrentWorkstation ? 'Sign Out' : 'Sign Out User'}</span>
+                          </button>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
