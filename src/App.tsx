@@ -19,6 +19,8 @@ import {
   createRewardEntryInDb,
   createStaffMemberInDb,
   db,
+  deleteRewardEntryInDb,
+  editRewardEntryInDb,
   ensureOfficeSeeded,
   FirestoreActiveSessionDoc,
   FirestoreOfficeConfigDoc,
@@ -171,7 +173,17 @@ export default function App() {
       });
 
     const handleBeforeUnload = () => {
-      removeActiveSessionInDb(workstationSessionId).catch(() => {});
+      try {
+        const storedSessionId = sessionStorage.getItem('kimono_active_session_id');
+        if (storedSessionId) {
+          removeActiveSessionInDb(storedSessionId).catch(() => {});
+        }
+      } catch {
+        // Ignore storage errors
+      }
+      if (workstationSessionId) {
+        removeActiveSessionInDb(workstationSessionId).catch(() => {});
+      }
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
 
@@ -214,18 +226,18 @@ export default function App() {
     const idToRemove = workstationSessionId;
     setIsSessionRegistered(false);
     setSession(null);
-    setWorkstationSessionId(`SESS-${Date.now()}-${Math.floor(Math.random() * 10000)}`);
+    setWorkstationSessionId('');
     await removeActiveSessionInDb(idToRemove);
   };
 
-  // Detect if the Manager remotely signed out this workstation's active session
+  // Detect if the Manager remotely signed out this specific workstation's active session
   useEffect(() => {
-    if (!session || !isSessionRegistered) return;
+    if (!session || !isSessionRegistered || !workstationSessionId) return;
     const stillActive = activeSessions.some((s) => s.sessionId === workstationSessionId);
     if (!stillActive) {
       setIsSessionRegistered(false);
       setSession(null);
-      setWorkstationSessionId(`SESS-${Date.now()}-${Math.floor(Math.random() * 10000)}`);
+      setWorkstationSessionId('');
     }
   }, [activeSessions, session, isSessionRegistered, workstationSessionId]);
 
@@ -242,7 +254,7 @@ export default function App() {
         const idToRemove = workstationSessionId;
         setIsSessionRegistered(false);
         setSession(null);
-        setWorkstationSessionId(`SESS-${Date.now()}-${Math.floor(Math.random() * 10000)}`);
+        setWorkstationSessionId('');
         removeActiveSessionInDb(idToRemove).catch(() => {});
       }, IDLE_TIMEOUT_MS);
     };
@@ -271,33 +283,40 @@ export default function App() {
     return (
       <AuthGatePage
         staffRecords={staffRecords}
+        activeSessions={activeSessions}
         managerPasswordHash={managerPasswordHash}
         onAuthenticatedStaff={async (staff) => {
+          const newSessionId = `SESS-${staff.id}-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+          await registerActiveSessionInDb(
+            newSessionId,
+            'staff',
+            staff.id,
+            staff.staffName,
+            staff.staffLoginId
+          );
+          setWorkstationSessionId(newSessionId);
           setSession({
             role: 'staff',
             staffId: staff.id,
             staffName: staff.staffName,
             staffLoginId: staff.staffLoginId
           });
-          await registerActiveSessionInDb(
-            workstationSessionId,
-            'staff',
-            staff.id,
-            staff.staffName,
-            staff.staffLoginId
-          );
           setIsSessionRegistered(true);
+          return true;
         }}
         onAuthenticatedManager={async (email) => {
-          setSession({ role: 'manager', email });
+          const newSessionId = `SESS-MGR-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
           await registerActiveSessionInDb(
-            workstationSessionId,
+            newSessionId,
             'manager',
             'MANAGER',
             'Manager',
             'MANAGER'
           );
+          setWorkstationSessionId(newSessionId);
+          setSession({ role: 'manager', email });
           setIsSessionRegistered(true);
+          return true;
         }}
       />
     );
@@ -347,6 +366,68 @@ export default function App() {
       `Submitted Rewards # ${cleanNumber} (Reservation # ${reservationNumber}) under ${targetStaff.staffName}. Synced to all workstations — Pending Manager Approval.`
     );
     setTimeout(() => setNoticeBanner(null), 5000);
+  };
+
+  // Staff or Manager Edits an Unapproved Rewards Number / Reservation Number entry in Firestore
+  const handleEditStaffRewardNumber = async (
+    entryId: string,
+    newReservationNumber: string,
+    newRewardsNumber: string,
+    newDateIso?: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    const cleanNumber = newRewardsNumber.replace(/\s+/g, '');
+    if (!/^\d{16}$/.test(cleanNumber)) {
+      return { success: false, error: 'Rewards number must be exactly 16 digits.' };
+    }
+
+    // Check duplicate against other entries
+    const duplicate = staffRecords.some((s) =>
+      s.entries.some(
+        (e) =>
+          e.entryId !== entryId &&
+          e.status !== 'rejected' &&
+          e.rewardsNumber.replace(/\s+/g, '') === cleanNumber
+      )
+    );
+    if (duplicate) {
+      return {
+        success: false,
+        error: `Duplicate Blocked: Rewards Number ${cleanNumber} is already recorded in the system.`
+      };
+    }
+
+    const res = await editRewardEntryInDb(
+      entryId,
+      newReservationNumber,
+      cleanNumber,
+      newDateIso
+    );
+
+    if (res.success) {
+      setNoticeBanner(
+        `Updated entry: Reservation # ${newReservationNumber.toUpperCase()} · Rewards # ${cleanNumber}. Synced across all workstations.`
+      );
+      setTimeout(() => setNoticeBanner(null), 5000);
+    } else if (res.error) {
+      setNoticeBanner(res.error);
+      setTimeout(() => setNoticeBanner(null), 5000);
+    }
+    return res;
+  };
+
+  // Staff or Manager Deletes an Unapproved Rewards Number entry from Firestore
+  const handleDeleteStaffRewardNumber = async (
+    entryId: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    const res = await deleteRewardEntryInDb(entryId);
+    if (res.success) {
+      setNoticeBanner('Entry deleted successfully from all workstations.');
+      setTimeout(() => setNoticeBanner(null), 4000);
+    } else if (res.error) {
+      setNoticeBanner(res.error);
+      setTimeout(() => setNoticeBanner(null), 4000);
+    }
+    return res;
   };
 
   // Manager Approves or Rejects a single entry in Firestore
@@ -694,6 +775,8 @@ export default function App() {
           searchQuery={searchQuery}
           onSearchQueryChange={setSearchQuery}
           onSubmitStaffRewardNumber={handleSubmitStaffRewardNumber}
+          onEditStaffRewardNumber={handleEditStaffRewardNumber}
+          onDeleteStaffRewardNumber={handleDeleteStaffRewardNumber}
           onManagerDecision={handleManagerDecision}
           onManagerApproveAll={handleManagerApproveAll}
           onCreateStaffMember={handleCreateStaffMember}
@@ -742,6 +825,8 @@ export default function App() {
         selectedDateIso={selectedDateIso}
         staffRecords={staffRecords}
         includeStaffIds={session.role === 'manager'}
+        viewerRole={session.role}
+        currentStaffId={session.role === 'staff' ? session.staffId : undefined}
         onExportComplete={(filename) => {
           setNoticeBanner(`Downloaded Approved Leaderboard PDF (${filename}).`);
           setTimeout(() => setNoticeBanner(null), 5000);

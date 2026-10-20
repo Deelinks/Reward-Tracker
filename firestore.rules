@@ -162,17 +162,24 @@ service cloud.firestore {
         isValidId(entryId) &&
         incoming().entryId == existing().entryId &&
         incoming().staffId == existing().staffId &&
-        incoming().reservationNumber == existing().reservationNumber &&
-        incoming().rewardsNumber == existing().rewardsNumber &&
-        incoming().dateIso == existing().dateIso &&
-        incoming().timestamp == existing().timestamp &&
         incoming().workspaceId == existing().workspaceId &&
-        incoming().diff(existing()).affectedKeys().hasOnly(['status', 'reviewedBy']);
-      allow delete: if isValidId(entryId) && existing().workspaceId == 'aurelia-office';
+        (
+          // Manager decision update (status, reviewedBy)
+          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'reviewedBy']) ||
+          // User edit before approval (allowed only if currently not approved)
+          (
+            existing().status != 'approved' &&
+            incoming().status == existing().status &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['reservationNumber', 'rewardsNumber', 'dateIso', 'timestamp'])
+          )
+        );
+      allow delete: if isValidId(entryId) &&
+        existing().workspaceId == 'aurelia-office' &&
+        existing().status != 'approved';
     }
 
     match /active_sessions/{sessionId} {
-      allow get: if isValidId(sessionId) && existing().workspaceId == 'aurelia-office';
+      allow get: if isValidId(sessionId) && (resource == null || existing().workspaceId == 'aurelia-office');
       allow list: if existing().workspaceId == 'aurelia-office';
       allow create: if isValidId(sessionId) &&
         isValidActiveSession(incoming()) &&

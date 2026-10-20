@@ -11,6 +11,8 @@ export interface PdfExportOptions {
   executiveNotes: string;
   staffRecords: StaffMemberRecord[];
   includeStaffIds?: boolean;
+  viewerRole?: 'staff' | 'manager';
+  currentStaffId?: string;
 }
 
 export function generateManagementPdfReport(options: PdfExportOptions): string {
@@ -100,19 +102,29 @@ export function generateManagementPdfReport(options: PdfExportOptions): string {
         'Latest Approved 16-Digit Rewards Numbers'
       ]
     ],
-    body: rankedStaff.map((s, idx) => [
-      `#${idx + 1}`,
-      options.includeStaffIds ? s.staffLoginId : 'Protected',
-      s.staffName,
-      s.dayCount.toString(),
-      s.monthCount.toString(),
-      s.pendingCount.toString(),
-      s.monthlyGoal.toString(),
-      s.approvedMonthEntries
-        .slice(0, 2)
-        .map((e) => `${e.rewardsNumber} (${e.reservationNumber})`)
-        .join(', ') || 'None'
-    ]),
+    body: rankedStaff.map((s, idx) => {
+      const isManager = options.viewerRole === 'manager';
+      const isOwner = options.viewerRole === 'staff' && options.currentStaffId === s.id;
+      const canViewNumbers = isManager || isOwner;
+
+      const numbersSummary = canViewNumbers
+        ? s.approvedMonthEntries
+            .slice(0, 2)
+            .map((e) => `${e.rewardsNumber} (${e.reservationNumber})`)
+            .join(', ') || 'None'
+        : 'Private (Assigned Staff Only)';
+
+      return [
+        `#${idx + 1}`,
+        options.includeStaffIds ? s.staffLoginId : 'Protected',
+        s.staffName,
+        s.dayCount.toString(),
+        s.monthCount.toString(),
+        s.pendingCount.toString(),
+        s.monthlyGoal.toString(),
+        numbersSummary
+      ];
+    }),
     foot: [
       [
         'TOTAL',

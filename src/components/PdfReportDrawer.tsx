@@ -11,6 +11,8 @@ interface PdfReportDrawerProps {
   selectedDateIso: string;
   staffRecords: StaffMemberRecord[];
   includeStaffIds?: boolean;
+  viewerRole?: 'staff' | 'manager';
+  currentStaffId?: string;
   onExportComplete: (filename: string) => void;
 }
 
@@ -22,6 +24,8 @@ export const PdfReportDrawer: React.FC<PdfReportDrawerProps> = ({
   selectedDateIso,
   staffRecords,
   includeStaffIds = false,
+  viewerRole = 'staff',
+  currentStaffId,
   onExportComplete
 }) => {
   const [reportTitle, setReportTitle] = useState(
@@ -44,7 +48,9 @@ export const PdfReportDrawer: React.FC<PdfReportDrawerProps> = ({
       preparedBy,
       executiveNotes,
       staffRecords,
-      includeStaffIds
+      includeStaffIds,
+      viewerRole,
+      currentStaffId
     });
     onExportComplete(savedFilename);
     onClose();

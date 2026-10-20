@@ -9,6 +9,7 @@ import {
   getDocs,
   getFirestore,
   query,
+  runTransaction,
   setDoc,
   updateDoc,
   where,
@@ -195,32 +196,43 @@ export function formatAurStaffId(raw: string): string {
   return `AUR-${withoutPrefix}`.slice(0, 32);
 }
 
-// Register a user's active session across workstations
+// Register a user's active session across workstations (Allows multiple concurrent active sessions per user)
 export async function registerActiveSessionInDb(
   sessionId: string,
   role: 'staff' | 'manager',
   userId: string,
   displayName: string,
   loginIdentifier: string
-): Promise<void> {
+): Promise<{ success: boolean }> {
+  const cleanSessionId = sessionId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+  const cleanUserId = userId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
   const nowStr = new Date().toLocaleTimeString('en-US', {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit'
   });
+
   const payload: FirestoreActiveSessionDoc = {
-    sessionId: sessionId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64),
+    sessionId: cleanSessionId,
     role,
-    userId: sanitizeText(userId, 64),
+    userId: cleanUserId,
     displayName: sanitizeText(displayName, 80),
     loginIdentifier: sanitizeText(loginIdentifier, 80),
     signedInAt: nowStr.slice(0, 32),
     workspaceId: WORKSPACE_ID
   };
+
   try {
-    await setDoc(doc(db, 'active_sessions', payload.sessionId), payload);
+    await setDoc(doc(db, 'active_sessions', cleanSessionId), payload);
+    try {
+      sessionStorage.setItem('kimono_active_session_id', cleanSessionId);
+    } catch {
+      // Ignore sessionStorage errors in restricted frames
+    }
+    return { success: true };
   } catch (error) {
-    handleFirestoreError(error, OperationType.CREATE, `active_sessions/${sessionId}`);
+    handleFirestoreError(error, OperationType.CREATE, `active_sessions/${cleanSessionId}`);
+    return { success: false };
   }
 }
 
@@ -229,27 +241,37 @@ export async function updateActiveSessionIdentifierInDb(
   sessionId: string,
   newLoginIdentifier: string
 ): Promise<void> {
+  const cleanId = sessionId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
   const nowStr = new Date().toLocaleTimeString('en-US', {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit'
   });
   try {
-    await updateDoc(doc(db, 'active_sessions', sessionId), {
+    await updateDoc(doc(db, 'active_sessions', cleanId), {
       loginIdentifier: sanitizeText(newLoginIdentifier, 80),
       signedInAt: nowStr.slice(0, 32)
     });
   } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, `active_sessions/${sessionId}`);
+    handleFirestoreError(error, OperationType.UPDATE, `active_sessions/${cleanId}`);
   }
 }
 
 // Remove an active session when a user signs out or locks their workstation
 export async function removeActiveSessionInDb(sessionId: string): Promise<void> {
+  const cleanId = sessionId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+  if (!cleanId) return;
   try {
-    await deleteDoc(doc(db, 'active_sessions', sessionId));
+    await deleteDoc(doc(db, 'active_sessions', cleanId));
+    try {
+      if (sessionStorage.getItem('kimono_active_session_id') === cleanId) {
+        sessionStorage.removeItem('kimono_active_session_id');
+      }
+    } catch {
+      // Ignore storage errors
+    }
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, `active_sessions/${sessionId}`);
+    handleFirestoreError(error, OperationType.DELETE, `active_sessions/${cleanId}`);
   }
 }
 
@@ -334,6 +356,75 @@ export async function createRewardEntryInDb(
     await setDoc(doc(db, 'reward_entries', entryId), payload);
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, path);
+  }
+}
+
+// Edit an unapproved reward entry (allowed only before approval)
+export async function editRewardEntryInDb(
+  entryId: string,
+  newReservationNumber: string,
+  newRewardsNumber: string,
+  newDateIso?: string
+): Promise<{ success: boolean; error?: string }> {
+  const path = `reward_entries/${entryId}`;
+  try {
+    const entryRef = doc(db, 'reward_entries', entryId);
+    const snap = await getDoc(entryRef);
+    if (!snap.exists()) {
+      return { success: false, error: 'Entry not found.' };
+    }
+    const data = snap.data() as FirestoreRewardEntryDoc;
+    if (data.status === 'approved') {
+      return { success: false, error: 'Approved entries cannot be edited.' };
+    }
+
+    const safeRes = sanitizeReservationNumber(newReservationNumber);
+    const safeRewards = newRewardsNumber.replace(/[^\d]/g, '').slice(0, 16);
+    const nowTime = new Date().toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
+
+    const updatePayload: Partial<FirestoreRewardEntryDoc> = {
+      reservationNumber: safeRes,
+      rewardsNumber: safeRewards,
+      timestamp: nowTime.slice(0, 12)
+    };
+
+    if (newDateIso && /^\d{4}-\d{2}-\d{2}$/.test(newDateIso)) {
+      updatePayload.dateIso = newDateIso.slice(0, 10);
+    }
+
+    await updateDoc(entryRef, updatePayload);
+    return { success: true };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+    return { success: false, error: 'Failed to update entry in database.' };
+  }
+}
+
+// Delete an unapproved reward entry (allowed only before approval)
+export async function deleteRewardEntryInDb(
+  entryId: string
+): Promise<{ success: boolean; error?: string }> {
+  const path = `reward_entries/${entryId}`;
+  try {
+    const entryRef = doc(db, 'reward_entries', entryId);
+    const snap = await getDoc(entryRef);
+    if (!snap.exists()) {
+      return { success: false, error: 'Entry not found.' };
+    }
+    const data = snap.data() as FirestoreRewardEntryDoc;
+    if (data.status === 'approved') {
+      return { success: false, error: 'Approved entries cannot be deleted.' };
+    }
+
+    await deleteDoc(entryRef);
+    return { success: true };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+    return { success: false, error: 'Failed to delete entry from database.' };
   }
 }
 

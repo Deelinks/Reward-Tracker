@@ -6,18 +6,20 @@ import {
   MANAGER_EMAIL,
   StaffMemberRecord
 } from '../data/hotelLoyaltyData';
-import { hashManagerPassword } from '../services/firebaseClient';
+import { FirestoreActiveSessionDoc, hashManagerPassword } from '../services/firebaseClient';
 import { KeyRound, Lock, ShieldCheck, UserCheck, Users } from 'lucide-react';
 
 interface AuthGatePageProps {
   staffRecords: StaffMemberRecord[];
+  activeSessions: FirestoreActiveSessionDoc[];
   managerPasswordHash: string;
-  onAuthenticatedStaff: (staff: StaffMemberRecord) => void;
-  onAuthenticatedManager: (email: string) => void;
+  onAuthenticatedStaff: (staff: StaffMemberRecord) => Promise<boolean>;
+  onAuthenticatedManager: (email: string) => Promise<boolean>;
 }
 
 export const AuthGatePage: React.FC<AuthGatePageProps> = ({
   staffRecords,
+  activeSessions,
   managerPasswordHash,
   onAuthenticatedStaff,
   onAuthenticatedManager
@@ -58,7 +60,7 @@ export const AuthGatePage: React.FC<AuthGatePageProps> = ({
     }
   };
 
-  const handleStaffSubmit = (e: React.FormEvent) => {
+  const handleStaffSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!checkRateLimit()) return;
 
@@ -85,7 +87,7 @@ export const AuthGatePage: React.FC<AuthGatePageProps> = ({
 
     setFailedAttempts(0);
     setErrorMsg(null);
-    onAuthenticatedStaff(matchedStaff);
+    await onAuthenticatedStaff(matchedStaff);
   };
 
   const handleManagerSubmit = async (e: React.FormEvent) => {
@@ -107,7 +109,7 @@ export const AuthGatePage: React.FC<AuthGatePageProps> = ({
 
     setFailedAttempts(0);
     setErrorMsg(null);
-    onAuthenticatedManager(MANAGER_EMAIL);
+    await onAuthenticatedManager(MANAGER_EMAIL);
   };
 
   return (

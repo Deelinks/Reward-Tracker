@@ -16,6 +16,7 @@ import {
   KeyRound,
   Lock,
   LogOut,
+  Pencil,
   Plus,
   RefreshCw,
   Search,
@@ -48,6 +49,15 @@ interface EnrollerLeaderboardProps {
     rewardsNumber: string,
     dateIso: string
   ) => void;
+  onEditStaffRewardNumber: (
+    entryId: string,
+    newReservationNumber: string,
+    newRewardsNumber: string,
+    newDateIso?: string
+  ) => Promise<{ success: boolean; error?: string }>;
+  onDeleteStaffRewardNumber: (
+    entryId: string
+  ) => Promise<{ success: boolean; error?: string }>;
   onManagerDecision: (
     staffId: string,
     entryId: string,
@@ -85,6 +95,8 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
   searchQuery,
   onSearchQueryChange,
   onSubmitStaffRewardNumber,
+  onEditStaffRewardNumber,
+  onDeleteStaffRewardNumber,
   onManagerDecision,
   onManagerApproveAll,
   onCreateStaffMember,
@@ -142,6 +154,32 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
     session.role === 'staff' ? session.staffId : staffRecords[0]?.id || null
   );
 
+  // Edit / Delete Reward Entry State (Allowed only when entry is not approved)
+  const [editingEntry, setEditingEntry] = useState<{
+    staffId: string;
+    staffName: string;
+    entryId: string;
+    reservationNumber: string;
+    rewardsNumber: string;
+    dateIso: string;
+  } | null>(null);
+  const [editResInput, setEditResInput] = useState<string>('');
+  const [editRewardsInput, setEditRewardsInput] = useState<string>('');
+  const [editDateInput, setEditDateInput] = useState<string>('');
+  const [editModalError, setEditModalError] = useState<string | null>(null);
+  const [isSubmittingEdit, setIsSubmittingEdit] = useState<boolean>(false);
+
+  // Delete Confirmation State
+  const [deletingEntry, setDeletingEntry] = useState<{
+    staffId: string;
+    staffName: string;
+    entryId: string;
+    reservationNumber: string;
+    rewardsNumber: string;
+  } | null>(null);
+  const [deleteModalError, setDeleteModalError] = useState<string | null>(null);
+  const [isSubmittingDelete, setIsSubmittingDelete] = useState<boolean>(false);
+
   // Check if a rewards number is already recorded by ANY staff member at ANY time (unless rejected)
   const findExistingRewardsRecord = (rawNumber: string) => {
     const normalized = rawNumber.replace(/\s+/g, '');
@@ -160,6 +198,108 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
   };
 
   const liveDuplicateMatch = findExistingRewardsRecord(rewardsNumberInput);
+
+  // Open Edit Modal for an unapproved entry
+  const handleOpenEditModal = (
+    staffId: string,
+    staffName: string,
+    entry: { entryId: string; reservationNumber: string; rewardsNumber: string; dateIso: string; status: string }
+  ) => {
+    if (entry.status === 'approved') return;
+    setEditingEntry({
+      staffId,
+      staffName,
+      entryId: entry.entryId,
+      reservationNumber: entry.reservationNumber,
+      rewardsNumber: entry.rewardsNumber,
+      dateIso: entry.dateIso
+    });
+    setEditResInput(entry.reservationNumber);
+    setEditRewardsInput(entry.rewardsNumber);
+    setEditDateInput(entry.dateIso);
+    setEditModalError(null);
+  };
+
+  // Submit Edit for unapproved entry
+  const handleSaveEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingEntry) return;
+
+    const cleanRes = editResInput.trim().toUpperCase();
+    const cleanRewards = editRewardsInput.replace(/\s+/g, '');
+
+    if (!cleanRes) {
+      setEditModalError('Reservation number cannot be empty.');
+      return;
+    }
+    if (!/^\d{16}$/.test(cleanRewards)) {
+      setEditModalError(`Rewards number must be exactly 16 digits (currently ${cleanRewards.length}).`);
+      return;
+    }
+
+    // Check duplicate against other recorded numbers
+    const dup = findExistingRewardsRecord(cleanRewards);
+    if (dup && dup.entry.entryId !== editingEntry.entryId) {
+      if (session.role === 'manager' || dup.staff.id === session.staffId) {
+        setEditModalError(
+          `Duplicate Blocked: Number ${cleanRewards} is already recorded by ${dup.staff.staffName} (Reservation ${dup.entry.reservationNumber}).`
+        );
+      } else {
+        setEditModalError(
+          `Duplicate Blocked: Number ${cleanRewards} is already recorded in the system. Each rewards number can only be entered once.`
+        );
+      }
+      return;
+    }
+
+    setIsSubmittingEdit(true);
+    setEditModalError(null);
+    const res = await onEditStaffRewardNumber(
+      editingEntry.entryId,
+      cleanRes,
+      cleanRewards,
+      editDateInput
+    );
+    setIsSubmittingEdit(false);
+
+    if (res.success) {
+      setEditingEntry(null);
+    } else {
+      setEditModalError(res.error || 'Failed to update entry.');
+    }
+  };
+
+  // Open Delete Confirmation Modal for an unapproved entry
+  const handleOpenDeleteModal = (
+    staffId: string,
+    staffName: string,
+    entry: { entryId: string; reservationNumber: string; rewardsNumber: string; status: string }
+  ) => {
+    if (entry.status === 'approved') return;
+    setDeletingEntry({
+      staffId,
+      staffName,
+      entryId: entry.entryId,
+      reservationNumber: entry.reservationNumber,
+      rewardsNumber: entry.rewardsNumber
+    });
+    setDeleteModalError(null);
+  };
+
+  // Confirm Delete for unapproved entry
+  const handleConfirmDelete = async () => {
+    if (!deletingEntry) return;
+    setIsSubmittingDelete(true);
+    setDeleteModalError(null);
+    const res = await onDeleteStaffRewardNumber(deletingEntry.entryId);
+    setIsSubmittingDelete(false);
+
+    if (res.success) {
+      setDeletingEntry(null);
+    } else {
+      setDeleteModalError(res.error || 'Failed to delete entry.');
+    }
+  };
 
   // Handle Logged-in Staff Submitting a New Rewards Number + Reservation Number
   const handleStaffRewardSubmit = (e: React.FormEvent) => {
@@ -186,9 +326,15 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
 
     const existing = findExistingRewardsRecord(normalizedRewards);
     if (existing) {
-      setFormError(
-        `Duplicate Blocked: Number ${normalizedRewards} was already recorded by ${existing.staff.staffName} (Reservation ${existing.entry.reservationNumber}) on ${existing.entry.dateIso}.`
-      );
+      if (existing.staff.id === session.staffId) {
+        setFormError(
+          `Duplicate Blocked: Number ${normalizedRewards} was already recorded by you (Reservation ${existing.entry.reservationNumber}) on ${existing.entry.dateIso}.`
+        );
+      } else {
+        setFormError(
+          `Duplicate Blocked: Rewards Number ${normalizedRewards} is already recorded in the system. Each rewards number can only be entered once.`
+        );
+      }
       return;
     }
 
@@ -423,15 +569,25 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
     .filter((s) => {
       if (!searchQuery.trim()) return true;
       const q = searchQuery.toLowerCase();
-      return (
+      const matchesStaffInfo =
         s.staffName.toLowerCase().includes(q) ||
-        s.staffLoginId.toLowerCase().includes(q) ||
-        s.entries.some(
+        (session.role === 'manager' && s.staffLoginId.toLowerCase().includes(q));
+
+      if (matchesStaffInfo) return true;
+
+      // Only allow searching entries if Manager or if the entries belong to the logged-in staff member
+      const canSearchEntries =
+        session.role === 'manager' || (session.role === 'staff' && session.staffId === s.id);
+
+      if (canSearchEntries) {
+        return s.entries.some(
           (e) =>
             e.rewardsNumber.toLowerCase().includes(q) ||
             e.reservationNumber.toLowerCase().includes(q)
-        )
-      );
+        );
+      }
+
+      return false;
     })
     .sort((a, b) => {
       let diff = 0;
@@ -642,14 +798,25 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
 
               {liveDuplicateMatch && (
                 <div className="mt-3 p-3 bg-rose-50 border border-rose-300 rounded-lg text-xs font-medium text-rose-900">
-                  Duplicate Blocked: Rewards Number{' '}
-                  <strong className="font-mono-tabular">
-                    {liveDuplicateMatch.entry.rewardsNumber}
-                  </strong>{' '}
-                  was already recorded by <strong>{liveDuplicateMatch.staff.staffName}</strong>{' '}
-                  (Reservation <strong>{liveDuplicateMatch.entry.reservationNumber}</strong>) on{' '}
-                  <span className="font-mono-tabular">{liveDuplicateMatch.entry.dateIso}</span>.
-                  Staff cannot record the same number at any time.
+                  {liveDuplicateMatch.staff.id === session.staffId ? (
+                    <>
+                      Duplicate Blocked: Rewards Number{' '}
+                      <strong className="font-mono-tabular">
+                        {liveDuplicateMatch.entry.rewardsNumber}
+                      </strong>{' '}
+                      was already recorded by you (Reservation{' '}
+                      <strong>{liveDuplicateMatch.entry.reservationNumber}</strong>) on{' '}
+                      <span className="font-mono-tabular">{liveDuplicateMatch.entry.dateIso}</span>.
+                    </>
+                  ) : (
+                    <>
+                      Duplicate Blocked: Rewards Number{' '}
+                      <strong className="font-mono-tabular">
+                        {liveDuplicateMatch.entry.rewardsNumber}
+                      </strong>{' '}
+                      is already recorded in the system. Each rewards number can only be entered once.
+                    </>
+                  )}
                 </div>
               )}
 
@@ -790,7 +957,25 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
                           </span>
                         </div>
 
-                        <div className="flex items-center gap-2 shrink-0">
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditModal(staffId, staffName, entry)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-md cursor-pointer transition-colors"
+                            title="Edit reservation or rewards number before approval"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                            <span>Edit</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenDeleteModal(staffId, staffName, entry)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold bg-white hover:bg-rose-50 text-rose-700 border border-rose-300 rounded-md cursor-pointer transition-colors"
+                            title="Delete this pending entry"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Delete</span>
+                          </button>
                           <button
                             type="button"
                             onClick={() => onManagerDecision(staffId, entry.entryId, 'approved')}
@@ -1522,7 +1707,9 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
             </thead>
             <tbody className="divide-y divide-slate-200 text-sm">
               {filteredStaff.map((staff, idx) => {
-                const isExpanded = expandedStaffId === staff.id;
+                const canViewEntries =
+                  session.role === 'manager' || (session.role === 'staff' && session.staffId === staff.id);
+                const isExpanded = canViewEntries && expandedStaffId === staff.id;
                 const isCurrentStaff =
                   session.role === 'staff' && session.staffId === staff.id;
                 const isEditingRowGoal = editingGoalStaffId === staff.id;
@@ -1530,8 +1717,14 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
                 return (
                   <React.Fragment key={staff.id}>
                     <tr
-                      onClick={() => setExpandedStaffId(isExpanded ? null : staff.id)}
-                      className={`transition-colors cursor-pointer ${
+                      onClick={() => {
+                        if (canViewEntries) {
+                          setExpandedStaffId(isExpanded ? null : staff.id);
+                        }
+                      }}
+                      className={`transition-colors ${
+                        canViewEntries ? 'cursor-pointer' : 'cursor-default'
+                      } ${
                         isCurrentStaff
                           ? 'bg-indigo-50/70'
                           : isExpanded
@@ -1551,7 +1744,7 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
                         {staff.staffName}
                         {isCurrentStaff && (
                           <span className="ml-2 text-xs font-semibold text-indigo-700">
-                            (Signed In)
+                            (You)
                           </span>
                         )}
                       </td>
@@ -1641,21 +1834,31 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
                       </td>
 
                       <td className="py-3.5 pl-3 pr-3 text-right no-print">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setExpandedStaffId(isExpanded ? null : staff.id);
-                          }}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-md cursor-pointer"
-                        >
-                          <span>View Numbers</span>
-                          {isExpanded ? (
-                            <ChevronUp className="w-3.5 h-3.5" />
-                          ) : (
-                            <ChevronDown className="w-3.5 h-3.5" />
-                          )}
-                        </button>
+                        {canViewEntries ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setExpandedStaffId(isExpanded ? null : staff.id);
+                            }}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-md cursor-pointer"
+                          >
+                            <span>{isCurrentStaff ? 'My Numbers' : 'View Numbers'}</span>
+                            {isExpanded ? (
+                              <ChevronUp className="w-3.5 h-3.5" />
+                            ) : (
+                              <ChevronDown className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        ) : (
+                          <span
+                            className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium text-slate-400 bg-slate-100 rounded-md select-none"
+                            title="Only the assigned user and Manager can view individual rewards and reservation numbers"
+                          >
+                            <Lock className="w-3 h-3" />
+                            <span>Private</span>
+                          </span>
+                        )}
                       </td>
                     </tr>
 
@@ -1709,45 +1912,76 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
                                       <span className="text-[11px] font-semibold text-emerald-700 flex items-center gap-1">
                                         <UserCheck className="w-3.5 h-3.5" /> Approved
                                       </span>
-                                    ) : entry.status === 'pending' ? (
-                                      session.role === 'manager' ? (
-                                        <div className="flex items-center gap-1">
-                                          <button
-                                            type="button"
-                                            onClick={() =>
-                                              onManagerDecision(
-                                                staff.id,
-                                                entry.entryId,
-                                                'approved'
-                                              )
-                                            }
-                                            className="px-2 py-1 bg-emerald-600 text-white rounded text-[11px] font-semibold cursor-pointer"
-                                          >
-                                            Approve
-                                          </button>
-                                          <button
-                                            type="button"
-                                            onClick={() =>
-                                              onManagerDecision(
-                                                staff.id,
-                                                entry.entryId,
-                                                'rejected'
-                                              )
-                                            }
-                                            className="px-2 py-1 bg-rose-100 text-rose-800 rounded text-[11px] font-semibold cursor-pointer"
-                                          >
-                                            Reject
-                                          </button>
-                                        </div>
-                                      ) : (
-                                        <span className="text-[11px] font-semibold text-amber-700 flex items-center gap-1">
-                                          <Clock className="w-3.5 h-3.5" /> Pending
-                                        </span>
-                                      )
                                     ) : (
-                                      <span className="text-[11px] font-semibold text-rose-700">
-                                        Rejected
-                                      </span>
+                                      <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                                        {/* Edit & Delete for unapproved entry */}
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleOpenEditModal(staff.id, staff.staffName, entry);
+                                          }}
+                                          className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded cursor-pointer transition-colors"
+                                          title="Edit reservation or rewards number before approval"
+                                        >
+                                          <Pencil className="w-3 h-3" />
+                                          <span>Edit</span>
+                                        </button>
+
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleOpenDeleteModal(staff.id, staff.staffName, entry);
+                                          }}
+                                          className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold bg-white hover:bg-rose-50 text-rose-700 border border-rose-300 rounded cursor-pointer transition-colors"
+                                          title="Delete this entry before approval"
+                                        >
+                                          <Trash2 className="w-3 h-3" />
+                                          <span>Delete</span>
+                                        </button>
+
+                                        {entry.status === 'pending' ? (
+                                          session.role === 'manager' ? (
+                                            <div className="flex items-center gap-1">
+                                              <button
+                                                type="button"
+                                                onClick={() =>
+                                                  onManagerDecision(
+                                                    staff.id,
+                                                    entry.entryId,
+                                                    'approved'
+                                                  )
+                                                }
+                                                className="px-2 py-1 bg-emerald-600 text-white rounded text-[11px] font-semibold cursor-pointer"
+                                              >
+                                                Approve
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() =>
+                                                  onManagerDecision(
+                                                    staff.id,
+                                                    entry.entryId,
+                                                    'rejected'
+                                                  )
+                                                }
+                                                className="px-2 py-1 bg-rose-100 text-rose-800 rounded text-[11px] font-semibold cursor-pointer"
+                                              >
+                                                Reject
+                                              </button>
+                                            </div>
+                                          ) : (
+                                            <span className="text-[11px] font-semibold text-amber-700 flex items-center gap-1">
+                                              <Clock className="w-3.5 h-3.5" /> Pending
+                                            </span>
+                                          )
+                                        ) : (
+                                          <span className="text-[11px] font-semibold text-rose-700">
+                                            Rejected
+                                          </span>
+                                        )}
+                                      </div>
                                     )}
                                   </div>
                                 ))}
@@ -1764,6 +1998,202 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
           </table>
         </div>
       </section>
+      {/* EDIT MODAL (Only for non-approved entries) */}
+      <AnimatePresence>
+        {editingEntry && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden"
+            >
+              <div className="bg-slate-950 text-white px-5 py-4 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Pencil className="w-4 h-4 text-amber-400" />
+                  <span className="font-bold text-sm">
+                    Edit Entry ({editingEntry.staffName})
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!isSubmittingEdit) setEditingEntry(null);
+                  }}
+                  className="text-slate-400 hover:text-white cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveEditSubmit} className="p-5 space-y-4">
+                <p className="text-xs text-slate-600">
+                  You can edit the Reservation Number, 16-Digit Guest Rewards Number, and
+                  Date anytime before it is approved by the Manager.
+                </p>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Date Received
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={editDateInput}
+                    onChange={(e) => setEditDateInput(e.target.value)}
+                    className="w-full px-3 py-2 text-sm font-mono-tabular font-medium border border-slate-300 rounded-lg bg-white text-slate-900 focus:outline-none focus:border-indigo-600"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Reservation Number
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    maxLength={40}
+                    value={editResInput}
+                    onChange={(e) =>
+                      setEditResInput(
+                        e.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, '')
+                      )
+                    }
+                    placeholder="e.g. RES-840105"
+                    className="w-full px-3 py-2 text-sm font-mono-tabular font-semibold border border-slate-300 rounded-lg bg-white text-slate-900 focus:outline-none focus:border-indigo-600"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    16-Digit Guest Rewards Number
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    inputMode="numeric"
+                    minLength={16}
+                    maxLength={16}
+                    value={editRewardsInput}
+                    onChange={(e) =>
+                      setEditRewardsInput(
+                        e.target.value.replace(/[^\d]/g, '').slice(0, 16)
+                      )
+                    }
+                    placeholder="e.g. 6015995107986345"
+                    className="w-full px-3 py-2 text-sm font-mono-tabular font-bold border border-slate-300 rounded-lg bg-white text-slate-900 focus:outline-none focus:border-indigo-600"
+                  />
+                </div>
+
+                {editModalError && (
+                  <p className="text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 p-2.5 rounded-lg">
+                    {editModalError}
+                  </p>
+                )}
+
+                <div className="flex items-center justify-end gap-2.5 pt-2">
+                  <button
+                    type="button"
+                    disabled={isSubmittingEdit}
+                    onClick={() => setEditingEntry(null)}
+                    className="px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmittingEdit}
+                    className="px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg cursor-pointer disabled:opacity-50"
+                  >
+                    {isSubmittingEdit ? 'Saving...' : 'Save Changes'}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* DELETE CONFIRMATION MODAL (Only for non-approved entries) */}
+      <AnimatePresence>
+        {deletingEntry && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="bg-white rounded-2xl border border-rose-200 shadow-2xl max-w-sm w-full overflow-hidden"
+            >
+              <div className="bg-rose-950 text-white px-5 py-4 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Trash2 className="w-4 h-4 text-rose-400" />
+                  <span className="font-bold text-sm">Delete Entry</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!isSubmittingDelete) setDeletingEntry(null);
+                  }}
+                  className="text-rose-300 hover:text-white cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="p-5 space-y-3">
+                <p className="text-xs text-slate-700">
+                  Are you sure you want to delete this submission for{' '}
+                  <strong>{deletingEntry.staffName}</strong>?
+                </p>
+
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs space-y-1">
+                  <div>
+                    <span className="text-slate-500">Reservation: </span>
+                    <strong className="font-mono-tabular text-slate-900">
+                      {deletingEntry.reservationNumber}
+                    </strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-500">Rewards #: </span>
+                    <strong className="font-mono-tabular text-indigo-950">
+                      {deletingEntry.rewardsNumber}
+                    </strong>
+                  </div>
+                </div>
+
+                <p className="text-[11px] text-slate-500">
+                  Note: Entries can only be deleted before they are approved by the Manager.
+                </p>
+
+                {deleteModalError && (
+                  <p className="text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 p-2.5 rounded-lg">
+                    {deleteModalError}
+                  </p>
+                )}
+
+                <div className="flex items-center justify-end gap-2.5 pt-2">
+                  <button
+                    type="button"
+                    disabled={isSubmittingDelete}
+                    onClick={() => setDeletingEntry(null)}
+                    className="px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isSubmittingDelete}
+                    onClick={handleConfirmDelete}
+                    className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-lg cursor-pointer disabled:opacity-50"
+                  >
+                    {isSubmittingDelete ? 'Deleting...' : 'Delete Entry'}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
