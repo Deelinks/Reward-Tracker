@@ -199,6 +199,10 @@
           "maxLength": 32,
           "description": "Human-readable sign-in time"
         },
+        "lastHeartbeat": {
+          "type": "integer",
+          "description": "Timestamp in milliseconds (Date.now()) of the most recent workstation keep-alive pulse"
+        },
         "workspaceId": {
           "type": "string",
           "minLength": 4,

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
 import {
@@ -14,6 +14,7 @@ import {
   StaffMemberRecord
 } from './data/hotelLoyaltyData';
 import {
+  ACTIVE_SESSION_TTL_MS,
   approveAllPendingEntriesInDb,
   clearAllRewardEntriesInDb,
   createRewardEntryInDb,
@@ -28,9 +29,12 @@ import {
   FirestoreStaffDoc,
   formatAurStaffId,
   handleFirestoreError,
+  isSessionActive,
   OperationType,
+  purgeStaleSessionsInDb,
   registerActiveSessionInDb,
   removeActiveSessionInDb,
+  sendActiveSessionHeartbeatInDb,
   updateActiveSessionIdentifierInDb,
   updateAllStaffMonthlyGoalsInDb,
   updateManagerPasswordInDb,
@@ -68,7 +72,25 @@ export default function App() {
     }))
   );
   const [rewardEntries, setRewardEntries] = useState<FirestoreRewardEntryDoc[]>([]);
-  const [activeSessions, setActiveSessions] = useState<FirestoreActiveSessionDoc[]>([]);
+  const [rawActiveSessions, setRawActiveSessions] = useState<FirestoreActiveSessionDoc[]>([]);
+  const [heartbeatTicker, setHeartbeatTicker] = useState<number>(0);
+
+  // Periodically refresh presence so shut-down or closed PCs immediately drop off
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setHeartbeatTicker((prev) => prev + 1);
+    }, 4000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Filter only sessions that have pulsed within ACTIVE_SESSION_TTL_MS (35 seconds)
+  const activeSessions = useMemo(() => {
+    const now = Date.now();
+    return rawActiveSessions.filter(
+      (s) => s.lastHeartbeat && now - s.lastHeartbeat < ACTIVE_SESSION_TTL_MS
+    );
+  }, [rawActiveSessions, heartbeatTicker]);
+
   const [managerPasswordHash, setManagerPasswordHash] = useState<string>(
     INITIAL_MANAGER_PASSWORD_HASH
   );
@@ -161,7 +183,9 @@ export default function App() {
           (snap) => {
             const loadedSessions: FirestoreActiveSessionDoc[] = [];
             snap.forEach((d) => loadedSessions.push(d.data() as FirestoreActiveSessionDoc));
-            setActiveSessions(loadedSessions);
+            setRawActiveSessions(loadedSessions);
+            // Proactively purge any dead sessions left behind by closed/shut down PCs
+            purgeStaleSessionsInDb(loadedSessions).catch(() => {});
           },
           (error) => {
             handleFirestoreError(error, OperationType.LIST, 'active_sessions');
@@ -172,29 +196,13 @@ export default function App() {
         console.error('Initialization error:', err);
       });
 
-    const handleBeforeUnload = () => {
-      try {
-        const storedSessionId = sessionStorage.getItem('kimono_active_session_id');
-        if (storedSessionId) {
-          removeActiveSessionInDb(storedSessionId).catch(() => {});
-        }
-      } catch {
-        // Ignore storage errors
-      }
-      if (workstationSessionId) {
-        removeActiveSessionInDb(workstationSessionId).catch(() => {});
-      }
-    };
-    window.addEventListener('beforeunload', handleBeforeUnload);
-
     return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
       if (unsubConfig) unsubConfig();
       if (unsubStaff) unsubStaff();
       if (unsubEntries) unsubEntries();
       if (unsubSessions) unsubSessions();
     };
-  }, [workstationSessionId]);
+  }, []);
 
   // Combine staff documents + reward entry documents into StaffMemberRecord[]
   const staffRecords: StaffMemberRecord[] = staffDocs.map((s) => {
@@ -227,8 +235,55 @@ export default function App() {
     setIsSessionRegistered(false);
     setSession(null);
     setWorkstationSessionId('');
-    await removeActiveSessionInDb(idToRemove);
+    try {
+      sessionStorage.removeItem('kimono_active_session_id');
+    } catch {
+      // Ignore storage errors
+    }
+    if (idToRemove) {
+      await removeActiveSessionInDb(idToRemove);
+    }
   };
+
+  // Immediate keep-alive heartbeat while a user has their session open on this workstation
+  useEffect(() => {
+    if (!session || !isSessionRegistered || !workstationSessionId) return;
+
+    // Send immediate initial keep-alive pulse
+    sendActiveSessionHeartbeatInDb(workstationSessionId).catch(() => {});
+
+    // Repeat pulse every 12 seconds
+    const interval = setInterval(() => {
+      sendActiveSessionHeartbeatInDb(workstationSessionId).catch(() => {});
+    }, 12000);
+
+    return () => clearInterval(interval);
+  }, [session, isSessionRegistered, workstationSessionId]);
+
+  // Immediate cleanup when a user closes their tab, browser, or shuts down their workstation
+  useEffect(() => {
+    const cleanUpSession = () => {
+      let storedId: string | null = null;
+      try {
+        storedId = sessionStorage.getItem('kimono_active_session_id');
+      } catch {}
+      const sid = workstationSessionId || storedId;
+      if (sid) {
+        removeActiveSessionInDb(sid).catch(() => {});
+      }
+      try {
+        sessionStorage.removeItem('kimono_active_session_id');
+      } catch {}
+    };
+
+    window.addEventListener('beforeunload', cleanUpSession);
+    window.addEventListener('pagehide', cleanUpSession);
+
+    return () => {
+      window.removeEventListener('beforeunload', cleanUpSession);
+      window.removeEventListener('pagehide', cleanUpSession);
+    };
+  }, [workstationSessionId]);
 
   // Detect if the Manager remotely signed out this specific workstation's active session
   useEffect(() => {

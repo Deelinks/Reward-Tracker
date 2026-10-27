@@ -186,7 +186,16 @@ export interface FirestoreActiveSessionDoc {
   displayName: string;
   loginIdentifier: string;
   signedInAt: string;
+  lastHeartbeat?: number; // Epoch timestamp ms of last keep-alive heartbeat pulse
   workspaceId: string;
+}
+
+// Session is considered genuinely online if a keep-alive pulse was received within 35 seconds
+export const ACTIVE_SESSION_TTL_MS = 35 * 1000;
+
+export function isSessionActive(session: FirestoreActiveSessionDoc): boolean {
+  if (!session.lastHeartbeat) return false;
+  return Date.now() - session.lastHeartbeat < ACTIVE_SESSION_TTL_MS;
 }
 
 // Helper to ensure a Staff Login ID always begins with AUR-
@@ -219,6 +228,7 @@ export async function registerActiveSessionInDb(
     displayName: sanitizeText(displayName, 80),
     loginIdentifier: sanitizeText(loginIdentifier, 80),
     signedInAt: nowStr.slice(0, 32),
+    lastHeartbeat: Date.now(),
     workspaceId: WORKSPACE_ID
   };
 
@@ -236,6 +246,36 @@ export async function registerActiveSessionInDb(
   }
 }
 
+// Send periodic heartbeat pulse to prove workstation is currently alive and active
+export async function sendActiveSessionHeartbeatInDb(sessionId: string): Promise<void> {
+  const cleanId = sessionId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+  if (!cleanId) return;
+  try {
+    await updateDoc(doc(db, 'active_sessions', cleanId), {
+      lastHeartbeat: Date.now()
+    });
+  } catch {
+    // Silently ignore if session was removed or network is transient
+  }
+}
+
+// Proactively purge stale / shut-down sessions from Firestore
+export async function purgeStaleSessionsInDb(
+  sessions: FirestoreActiveSessionDoc[]
+): Promise<void> {
+  const now = Date.now();
+  for (const s of sessions) {
+    // If lastHeartbeat is older than 45 seconds or missing, purge it from Firestore
+    if (!s.lastHeartbeat || now - s.lastHeartbeat > 45 * 1000) {
+      try {
+        await deleteDoc(doc(db, 'active_sessions', s.sessionId));
+      } catch {
+        // Silently ignore permission or race conditions
+      }
+    }
+  }
+}
+
 // Update active session loginIdentifier if staff member changes their own AUR- ID
 export async function updateActiveSessionIdentifierInDb(
   sessionId: string,
@@ -250,14 +290,15 @@ export async function updateActiveSessionIdentifierInDb(
   try {
     await updateDoc(doc(db, 'active_sessions', cleanId), {
       loginIdentifier: sanitizeText(newLoginIdentifier, 80),
-      signedInAt: nowStr.slice(0, 32)
+      signedInAt: nowStr.slice(0, 32),
+      lastHeartbeat: Date.now()
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, `active_sessions/${cleanId}`);
   }
 }
 
-// Remove an active session when a user signs out or locks their workstation
+// Remove an active session when a user signs out, locks workstation, closes browser, or shuts down PC
 export async function removeActiveSessionInDb(sessionId: string): Promise<void> {
   const cleanId = sessionId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
   if (!cleanId) return;
