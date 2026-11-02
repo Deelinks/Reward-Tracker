@@ -155,7 +155,72 @@ export const INITIAL_STAFF_RECORDS: StaffMemberRecord[] = [
   }
 ];
 
-export const AVAILABLE_MONTHS = [
-  { key: '2026-10', label: 'October 2026', daysInMonth: 31 },
-  { key: '2026-09', label: 'September 2026', daysInMonth: 30 }
-] as const;
+// Helper to get local date ISO string YYYY-MM-DD synced to system clock
+export function getSystemDateIso(date = new Date()): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+// Helper to get month key YYYY-MM synced to system clock
+export function getSystemMonthKey(date = new Date()): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  return `${y}-${m}`;
+}
+
+export interface MonthMeta {
+  key: string; // YYYY-MM
+  label: string; // e.g. November 2026
+  daysInMonth: number;
+  year: number;
+  monthNum: number;
+}
+
+export function getMonthMeta(monthKey: string): MonthMeta {
+  const [yearStr, monthStr] = monthKey.split('-');
+  const now = new Date();
+  const year = parseInt(yearStr, 10) || now.getFullYear();
+  const monthNum = parseInt(monthStr, 10) || now.getMonth() + 1;
+  const dateObj = new Date(year, monthNum - 1, 1);
+  const label = dateObj.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  const daysInMonth = new Date(year, monthNum, 0).getDate();
+  return { key: monthKey, label, daysInMonth, year, monthNum };
+}
+
+// Dynamically generate available months covering current year, system month, and any months with recorded entries
+export function generateAvailableMonths(extraMonthKeys: string[] = []): MonthMeta[] {
+  const current = new Date();
+  const currentYear = current.getFullYear();
+  const currentMonthKey = getSystemMonthKey(current);
+  const monthKeysSet = new Set<string>();
+
+  // Include current system month
+  monthKeysSet.add(currentMonthKey);
+
+  // Include all 12 months for the current year
+  for (let m = 1; m <= 12; m++) {
+    const mStr = String(m).padStart(2, '0');
+    monthKeysSet.add(`${currentYear}-${mStr}`);
+  }
+
+  // Also include 2026-10 and 2026-09 historical months
+  monthKeysSet.add('2026-09');
+  monthKeysSet.add('2026-10');
+  monthKeysSet.add('2026-11');
+
+  // Include any extra month keys from database entries
+  extraMonthKeys.forEach((k) => {
+    if (/^\d{4}-\d{2}$/.test(k)) {
+      monthKeysSet.add(k);
+    }
+  });
+
+  // Sort latest months first
+  const sortedKeys = Array.from(monthKeysSet).sort((a, b) => b.localeCompare(a));
+  return sortedKeys.map(getMonthMeta);
+}
+
+export const AVAILABLE_MONTHS: readonly MonthMeta[] = generateAvailableMonths();
+

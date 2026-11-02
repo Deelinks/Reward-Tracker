@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
+  getSystemDateIso,
   StaffMemberRecord
 } from '../data/hotelLoyaltyData';
 import { FirestoreActiveSessionDoc, hashManagerPassword } from '../services/firebaseClient';
 import {
+  ArrowRightLeft,
   ArrowUpDown,
   Calendar,
   Check,
@@ -58,6 +60,10 @@ interface EnrollerLeaderboardProps {
   onDeleteStaffRewardNumber: (
     entryId: string
   ) => Promise<{ success: boolean; error?: string }>;
+  onReassignRewardStaff: (
+    entryId: string,
+    newStaffId: string
+  ) => Promise<{ success: boolean; error?: string }>;
   onManagerDecision: (
     staffId: string,
     entryId: string,
@@ -90,6 +96,7 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
   onLogout,
   selectedMonthKey,
   selectedMonthLabel,
+  daysInMonth,
   selectedDateIso,
   onSelectDateIso,
   searchQuery,
@@ -97,6 +104,7 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
   onSubmitStaffRewardNumber,
   onEditStaffRewardNumber,
   onDeleteStaffRewardNumber,
+  onReassignRewardStaff,
   onManagerDecision,
   onManagerApproveAll,
   onCreateStaffMember,
@@ -111,9 +119,9 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
   currentWorkstationSessionId,
   onForceSignOutSession
 }) => {
-  // Manager Console Active Tab ('approvals' | 'manageStaff' | 'signedInUsers' | 'security')
+  // Manager Console Active Tab ('approvals' | 'recordReward' | 'manageStaff' | 'signedInUsers' | 'security')
   const [managerTab, setManagerTab] = useState<
-    'approvals' | 'manageStaff' | 'signedInUsers' | 'security'
+    'approvals' | 'recordReward' | 'manageStaff' | 'signedInUsers' | 'security'
   >('approvals');
 
   // Create Staff & Goal Management State
@@ -145,7 +153,26 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
   // Staff Rewards Number Entry State (Reservation Number + 16-digit Rewards Number)
   const [reservationNumberInput, setReservationNumberInput] = useState<string>('');
   const [rewardsNumberInput, setRewardsNumberInput] = useState<string>('');
+  const [selectedEnrollerStaffId, setSelectedEnrollerStaffId] = useState<string>(
+    session.role === 'staff' ? session.staffId : staffRecords[0]?.id || ''
+  );
   const [formError, setFormError] = useState<string | null>(null);
+
+  // Reassign / Transfer Reward Entry State (Allowed for both pending & approved entries)
+  const [reassigningEntry, setReassigningEntry] = useState<{
+    staffId: string;
+    staffName: string;
+    staffLoginId: string;
+    entryId: string;
+    reservationNumber: string;
+    rewardsNumber: string;
+    dateIso: string;
+    timestamp: string;
+    status: string;
+  } | null>(null);
+  const [targetReassignStaffId, setTargetReassignStaffId] = useState<string>('');
+  const [reassignModalError, setReassignModalError] = useState<string | null>(null);
+  const [isSubmittingReassign, setIsSubmittingReassign] = useState<boolean>(false);
 
   // Leaderboard Sorting & Expanded Row
   const [sortMode, setSortMode] = useState<SortMode>('monthTotal');
@@ -301,10 +328,70 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
     }
   };
 
-  // Handle Logged-in Staff Submitting a New Rewards Number + Reservation Number
+  // Open Reassign Modal for any entry (pending or approved)
+  const handleOpenReassignModal = (
+    staffId: string,
+    staffName: string,
+    staffLoginId: string,
+    entry: {
+      entryId: string;
+      reservationNumber: string;
+      rewardsNumber: string;
+      dateIso: string;
+      timestamp: string;
+      status: string;
+    }
+  ) => {
+    setReassigningEntry({
+      staffId,
+      staffName,
+      staffLoginId,
+      entryId: entry.entryId,
+      reservationNumber: entry.reservationNumber,
+      rewardsNumber: entry.rewardsNumber,
+      dateIso: entry.dateIso,
+      timestamp: entry.timestamp,
+      status: entry.status
+    });
+    const otherStaff = staffRecords.find((s) => s.id !== staffId);
+    setTargetReassignStaffId(otherStaff ? otherStaff.id : staffId);
+    setReassignModalError(null);
+  };
+
+  // Confirm Reassign / Transfer entry to another staff member
+  const handleConfirmReassign = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reassigningEntry || !targetReassignStaffId) return;
+    if (targetReassignStaffId === reassigningEntry.staffId) {
+      setReassignModalError('Please select a different staff member to credit this reward to.');
+      return;
+    }
+
+    setIsSubmittingReassign(true);
+    setReassignModalError(null);
+    const res = await onReassignRewardStaff(reassigningEntry.entryId, targetReassignStaffId);
+    setIsSubmittingReassign(false);
+
+    if (res.success) {
+      setExpandedStaffId(targetReassignStaffId);
+      setReassigningEntry(null);
+    } else {
+      setReassignModalError(res.error || 'Failed to reassign entry.');
+    }
+  };
+
+  // Handle Submitting a New Rewards Number + Reservation Number (Staff or Manager on Behalf)
   const handleStaffRewardSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (session.role !== 'staff') return;
+    const creditedStaffId =
+      session.role === 'staff'
+        ? selectedEnrollerStaffId || session.staffId
+        : selectedEnrollerStaffId || staffRecords[0]?.id;
+
+    if (!creditedStaffId) {
+      setFormError('Please select the staff member to credit.');
+      return;
+    }
 
     const cleanReservation = reservationNumberInput.trim().toUpperCase();
     const normalizedRewards = rewardsNumberInput.replace(/\s+/g, '');
@@ -326,13 +413,13 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
 
     const existing = findExistingRewardsRecord(normalizedRewards);
     if (existing) {
-      if (existing.staff.id === session.staffId) {
+      if (session.role === 'staff' && existing.staff.id === session.staffId) {
         setFormError(
           `Duplicate Blocked: Number ${normalizedRewards} was already recorded by you (Reservation ${existing.entry.reservationNumber}) on ${existing.entry.dateIso}.`
         );
       } else {
         setFormError(
-          `Duplicate Blocked: Rewards Number ${normalizedRewards} is already recorded in the system. Each rewards number can only be entered once.`
+          `Duplicate Blocked: Rewards Number ${normalizedRewards} is already recorded in the system under ${existing.staff.staffName} (Reservation ${existing.entry.reservationNumber}).`
         );
       }
       return;
@@ -340,14 +427,14 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
 
     setFormError(null);
     onSubmitStaffRewardNumber(
-      session.staffId,
+      creditedStaffId,
       cleanReservation,
       normalizedRewards,
       selectedDateIso
     );
     setReservationNumberInput('');
     setRewardsNumberInput('');
-    setExpandedStaffId(session.staffId);
+    setExpandedStaffId(creditedStaffId);
   };
 
   // Handle Logged-in Staff Member Changing Their Own Unique ID (with mandatory AUR- prefix)
@@ -536,7 +623,7 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
     );
 
     const dailyApprovedMap: Record<number, number> = {};
-    for (let d = 1; d <= 10; d++) {
+    for (let d = 1; d <= daysInMonth; d++) {
       dailyApprovedMap[d] = 0;
     }
     monthApproved.forEach((entry) => {
@@ -605,8 +692,16 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
     }
   };
 
-  const visibleDays = [1, 2, 3, 4, 5, 6, 7, 8];
-  const selectedDayNum = parseInt(selectedDateIso.slice(8, 10), 10);
+  const selectedDayNum = parseInt(selectedDateIso.slice(8, 10), 10) || 1;
+  const shortMonthLabel = selectedMonthLabel.split(' ')[0].slice(0, 3);
+
+  // Dynamic window of up to 10 days in the month centered around selected day
+  const windowSize = Math.min(10, daysInMonth);
+  let startDay = Math.max(1, selectedDayNum - 4);
+  if (startDay + windowSize - 1 > daysInMonth) {
+    startDay = Math.max(1, daysInMonth - windowSize + 1);
+  }
+  const visibleDays = Array.from({ length: windowSize }, (_, i) => startDay + i);
 
   return (
     <div className="space-y-8">
@@ -715,11 +810,100 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
             )}
 
             <form onSubmit={handleStaffRewardSubmit} className="p-6">
+              {/* Enroller Credit Indicator & Quick Switcher */}
+              <div className="mb-5 p-3.5 bg-indigo-50/80 border border-indigo-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <div
+                    className="w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs text-white shrink-0 shadow-xs"
+                    style={{
+                      backgroundColor:
+                        staffRecords.find(
+                          (s) => s.id === (selectedEnrollerStaffId || session.staffId)
+                        )?.avatarColor || '#4f46e5'
+                    }}
+                  >
+                    {staffRecords
+                      .find((s) => s.id === (selectedEnrollerStaffId || session.staffId))
+                      ?.staffName.slice(0, 1) || 'S'}
+                  </div>
+                  <div>
+                    <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                      Credited Staff Member / Enroller
+                    </div>
+                    <div className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                      <span>
+                        {
+                          staffRecords.find(
+                            (s) => s.id === (selectedEnrollerStaffId || session.staffId)
+                          )?.staffName
+                        }
+                      </span>
+                      <span className="font-mono-tabular text-xs font-bold px-2 py-0.5 rounded bg-indigo-900 text-amber-300">
+                        {
+                          staffRecords.find(
+                            (s) => s.id === (selectedEnrollerStaffId || session.staffId)
+                          )?.staffLoginId
+                        }
+                      </span>
+                      {(selectedEnrollerStaffId || session.staffId) === session.staffId ? (
+                        <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">
+                          Your Active Session
+                        </span>
+                      ) : (
+                        <span className="text-[11px] font-semibold text-amber-800 bg-amber-100 px-2 py-0.5 rounded">
+                          Crediting Colleague
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <label
+                    htmlFor="enroller-switcher-staff"
+                    className="text-xs font-semibold text-indigo-900 shrink-0"
+                  >
+                    Switch Enroller:
+                  </label>
+                  <select
+                    id="enroller-switcher-staff"
+                    value={selectedEnrollerStaffId || session.staffId}
+                    onChange={(e) => setSelectedEnrollerStaffId(e.target.value)}
+                    className="px-3 py-1.5 text-xs font-semibold bg-white border border-indigo-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                  >
+                    {staffRecords.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.staffName} ({s.staffLoginId}) {s.id === session.staffId ? '— (You)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                  {selectedEnrollerStaffId && selectedEnrollerStaffId !== session.staffId && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedEnrollerStaffId(session.staffId)}
+                      className="text-[11px] font-semibold text-indigo-700 hover:underline cursor-pointer shrink-0"
+                    >
+                      Reset to Me
+                    </button>
+                  )}
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
                 <div>
-                  <label className="block text-sm font-semibold text-slate-800 mb-1.5">
-                    1. Date Received
-                  </label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-sm font-semibold text-slate-800">
+                      1. Date Received
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => onSelectDateIso(getSystemDateIso())}
+                      className="text-xs font-semibold text-indigo-700 hover:text-indigo-900 cursor-pointer"
+                      title="Sync to Today's date"
+                    >
+                      Sync Today
+                    </button>
+                  </div>
                   <div className="relative">
                     <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                     <input
@@ -857,6 +1041,17 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
                   </button>
                   <button
                     type="button"
+                    onClick={() => setManagerTab('recordReward')}
+                    className={`px-3 py-1.5 text-xs font-semibold rounded-md cursor-pointer transition-colors ${
+                      managerTab === 'recordReward'
+                        ? 'bg-amber-400 text-slate-950'
+                        : 'text-emerald-100 hover:text-white'
+                    }`}
+                  >
+                    Record Reward
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => {
                       setManagerTab('manageStaff');
                       if (!newStaffLoginId) {
@@ -969,6 +1164,17 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
                           </button>
                           <button
                             type="button"
+                            onClick={() =>
+                              handleOpenReassignModal(staffId, staffName, staffLoginId, entry)
+                            }
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-300 rounded-md cursor-pointer transition-colors"
+                            title="Reassign or transfer this reward to another staff member"
+                          >
+                            <ArrowRightLeft className="w-3.5 h-3.5" />
+                            <span>Reassign</span>
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => handleOpenDeleteModal(staffId, staffName, entry)}
                             className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold bg-white hover:bg-rose-50 text-rose-700 border border-rose-300 rounded-md cursor-pointer transition-colors"
                             title="Delete this pending entry"
@@ -997,6 +1203,139 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
                     ))}
                   </div>
                 )}
+              </div>
+            )}
+
+            {managerTab === 'recordReward' && (
+              <div className="p-6">
+                <div className="max-w-3xl bg-slate-50 border border-slate-200 rounded-xl p-5 shadow-xs">
+                  <div className="text-sm font-bold text-slate-900 mb-1 flex items-center gap-2">
+                    <Plus className="w-4 h-4 text-emerald-600" />
+                    <span>Record Reward Entry on Behalf of Staff Member</span>
+                  </div>
+                  <p className="text-xs text-slate-600 mb-5">
+                    Select which staff member enrolled the guest and enter the reservation details.
+                    This immediately creates and submits the entry for that staff member.
+                  </p>
+
+                  <form onSubmit={handleStaffRewardSubmit} className="space-y-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                        Credited Staff Member / Enroller
+                      </label>
+                      <select
+                        value={selectedEnrollerStaffId || staffRecords[0]?.id}
+                        onChange={(e) => setSelectedEnrollerStaffId(e.target.value)}
+                        className="w-full px-3 py-2.5 text-sm font-semibold border border-indigo-300 rounded-lg bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-600 cursor-pointer"
+                      >
+                        {staffRecords.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.staffName} ({s.staffLoginId}) — {s.role}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                      <div>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <label className="block text-xs font-semibold text-slate-700">
+                            1. Date Received
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => onSelectDateIso(getSystemDateIso())}
+                            className="text-[11px] font-semibold text-indigo-700 hover:underline cursor-pointer"
+                          >
+                            Sync Today
+                          </button>
+                        </div>
+                        <input
+                          type="date"
+                          value={selectedDateIso}
+                          onChange={(e) => onSelectDateIso(e.target.value)}
+                          className="w-full px-3 py-2 text-sm font-mono-tabular font-medium border border-slate-300 rounded-lg bg-white text-slate-900 focus:outline-none focus:border-indigo-600"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                          2. Reservation Number
+                        </label>
+                        <input
+                          type="text"
+                          maxLength={40}
+                          value={reservationNumberInput}
+                          onChange={(e) => {
+                            setReservationNumberInput(
+                              e.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, '')
+                            );
+                            if (formError) setFormError(null);
+                          }}
+                          placeholder="e.g. 27251324"
+                          className="w-full px-3 py-2 text-sm font-mono-tabular font-semibold border border-slate-300 rounded-lg bg-white text-slate-900 focus:outline-none focus:border-indigo-600"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                          3. 16-Digit Guest Rewards #
+                        </label>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          minLength={16}
+                          maxLength={16}
+                          value={rewardsNumberInput}
+                          onChange={(e) => {
+                            setRewardsNumberInput(
+                              e.target.value.replace(/[^\d]/g, '').slice(0, 16)
+                            );
+                            if (formError) setFormError(null);
+                          }}
+                          placeholder="e.g. 6015998219011417"
+                          className={`w-full px-3 py-2 text-sm font-mono-tabular font-bold border rounded-lg text-slate-900 focus:outline-none ${
+                            liveDuplicateMatch
+                              ? 'border-rose-500 bg-rose-50 text-rose-900'
+                              : 'border-amber-400 bg-amber-50/40 focus:border-amber-600'
+                          }`}
+                        />
+                      </div>
+                    </div>
+
+                    {liveDuplicateMatch && (
+                      <div className="p-3 bg-rose-50 border border-rose-300 rounded-lg text-xs font-medium text-rose-900">
+                        Duplicate Blocked: Rewards Number{' '}
+                        <strong className="font-mono-tabular">
+                          {liveDuplicateMatch.entry.rewardsNumber}
+                        </strong>{' '}
+                        is already recorded in the system under {liveDuplicateMatch.staff.staffName}{' '}
+                        (Reservation {liveDuplicateMatch.entry.reservationNumber}).
+                      </div>
+                    )}
+
+                    {formError && !liveDuplicateMatch && (
+                      <p className="text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 p-2.5 rounded-lg">
+                        {formError}
+                      </p>
+                    )}
+
+                    <div className="pt-2">
+                      <button
+                        type="submit"
+                        disabled={Boolean(liveDuplicateMatch)}
+                        className={`inline-flex items-center gap-1.5 px-5 py-2.5 text-xs font-semibold text-white rounded-lg transition-colors ${
+                          liveDuplicateMatch
+                            ? 'bg-rose-400 cursor-not-allowed'
+                            : 'bg-emerald-600 hover:bg-emerald-700 cursor-pointer'
+                        }`}
+                      >
+                        <Plus className="w-4 h-4" />
+                        <span>Record &amp; Credit to Selected Staff Member</span>
+                      </button>
+                    </div>
+                  </form>
+                </div>
               </div>
             )}
 
@@ -1673,11 +2012,13 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
                 {visibleDays.map((dayNum) => (
                   <th
                     key={dayNum}
-                    className={`py-3 px-2 text-center font-mono-tabular ${
-                      dayNum === selectedDayNum ? 'bg-amber-100/80 text-amber-950 font-bold' : ''
+                    onClick={() => onSelectDateIso(`${selectedMonthKey}-${String(dayNum).padStart(2, '0')}`)}
+                    className={`py-3 px-2 text-center font-mono-tabular cursor-pointer transition-colors ${
+                      dayNum === selectedDayNum ? 'bg-amber-100/80 text-amber-950 font-bold' : 'hover:bg-slate-100 text-slate-700'
                     }`}
+                    title={`Click to select ${shortMonthLabel} ${dayNum}`}
                   >
-                    Oct {dayNum}
+                    {shortMonthLabel} {dayNum}
                   </th>
                 ))}
                 <th className="py-3 px-3 text-right">
@@ -1909,12 +2250,34 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
                                     </div>
 
                                     {entry.status === 'approved' ? (
-                                      <span className="text-[11px] font-semibold text-emerald-700 flex items-center gap-1">
-                                        <UserCheck className="w-3.5 h-3.5" /> Approved
-                                      </span>
+                                      <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                                        <span className="text-[11px] font-semibold text-emerald-700 flex items-center gap-1">
+                                          <UserCheck className="w-3.5 h-3.5" /> Approved
+                                        </span>
+                                        {(session.role === 'manager' ||
+                                          session.staffId === staff.id) && (
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleOpenReassignModal(
+                                                staff.id,
+                                                staff.staffName,
+                                                staff.staffLoginId,
+                                                entry
+                                              );
+                                            }}
+                                            className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 rounded cursor-pointer transition-colors"
+                                            title="Reassign / transfer this reward to another staff member"
+                                          >
+                                            <ArrowRightLeft className="w-3 h-3" />
+                                            <span>Reassign</span>
+                                          </button>
+                                        )}
+                                      </div>
                                     ) : (
                                       <div className="flex items-center gap-1.5 flex-wrap justify-end">
-                                        {/* Edit & Delete for unapproved entry */}
+                                        {/* Edit, Reassign, & Delete for unapproved entry */}
                                         <button
                                           type="button"
                                           onClick={(e) => {
@@ -1926,6 +2289,24 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
                                         >
                                           <Pencil className="w-3 h-3" />
                                           <span>Edit</span>
+                                        </button>
+
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleOpenReassignModal(
+                                              staff.id,
+                                              staff.staffName,
+                                              staff.staffLoginId,
+                                              entry
+                                            );
+                                          }}
+                                          className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 rounded cursor-pointer transition-colors"
+                                          title="Reassign / transfer this reward to another staff member"
+                                        >
+                                          <ArrowRightLeft className="w-3 h-3" />
+                                          <span>Reassign</span>
                                         </button>
 
                                         <button
@@ -2190,6 +2571,129 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
                   </button>
                 </div>
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* REASSIGN / TRANSFER REWARD ENTRY MODAL */}
+      <AnimatePresence>
+        {reassigningEntry && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="bg-white rounded-2xl border border-indigo-200 shadow-2xl max-w-md w-full overflow-hidden"
+            >
+              <div className="bg-indigo-950 text-white px-5 py-4 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <ArrowRightLeft className="w-4 h-4 text-amber-400" />
+                  <span className="font-bold text-sm">Transfer / Reassign Reward Entry</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!isSubmittingReassign) setReassigningEntry(null);
+                  }}
+                  className="text-slate-400 hover:text-white cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <form onSubmit={handleConfirmReassign} className="p-5 space-y-4">
+                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-lg text-xs space-y-1.5 font-mono-tabular">
+                  <div className="flex justify-between text-slate-600">
+                    <span>Reservation Number:</span>
+                    <strong className="text-slate-900 font-bold">
+                      {reassigningEntry.reservationNumber}
+                    </strong>
+                  </div>
+                  <div className="flex justify-between text-slate-600">
+                    <span>16-Digit Rewards Number:</span>
+                    <strong className="text-indigo-950 font-bold">
+                      {reassigningEntry.rewardsNumber}
+                    </strong>
+                  </div>
+                  <div className="flex justify-between text-slate-600">
+                    <span>Date &amp; Time Logged:</span>
+                    <span className="text-slate-700">
+                      {reassigningEntry.dateIso} at {reassigningEntry.timestamp}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-slate-600">
+                    <span>Current Status:</span>
+                    <span
+                      className={`font-semibold capitalize ${
+                        reassigningEntry.status === 'approved'
+                          ? 'text-emerald-700'
+                          : reassigningEntry.status === 'pending'
+                          ? 'text-amber-700'
+                          : 'text-rose-700'
+                      }`}
+                    >
+                      {reassigningEntry.status}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-slate-600 pt-2 border-t border-slate-200">
+                    <span>Currently Credited To:</span>
+                    <strong className="text-amber-800 font-bold font-sans">
+                      {reassigningEntry.staffName} ({reassigningEntry.staffLoginId})
+                    </strong>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                    Select Correct Enroller / Staff Member to Credit:
+                  </label>
+                  <select
+                    value={targetReassignStaffId}
+                    onChange={(e) => {
+                      setTargetReassignStaffId(e.target.value);
+                      setReassignModalError(null);
+                    }}
+                    className="w-full px-3 py-2 text-sm font-semibold border border-indigo-300 rounded-lg bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-600 cursor-pointer"
+                  >
+                    {staffRecords.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.staffName} ({s.staffLoginId}) — {s.role}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <p className="text-[11px] text-slate-500">
+                  Transferring this entry immediately updates leaderboard counts and daily tallies
+                  across all workstations so the right person is officially credited.
+                </p>
+
+                {reassignModalError && (
+                  <p className="text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 p-2.5 rounded-lg">
+                    {reassignModalError}
+                  </p>
+                )}
+
+                <div className="flex items-center justify-end gap-2.5 pt-2">
+                  <button
+                    type="button"
+                    disabled={isSubmittingReassign}
+                    onClick={() => setReassigningEntry(null)}
+                    className="px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmittingReassign}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg cursor-pointer disabled:opacity-50"
+                  >
+                    <ArrowRightLeft className="w-3.5 h-3.5" />
+                    <span>{isSubmittingReassign ? 'Transferring...' : 'Transfer Credit Now'}</span>
+                  </button>
+                </div>
+              </form>
             </motion.div>
           </div>
         )}

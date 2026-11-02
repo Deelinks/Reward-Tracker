@@ -8,6 +8,10 @@ import { AnimatePresence, motion } from 'motion/react';
 import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
 import {
   AVAILABLE_MONTHS,
+  generateAvailableMonths,
+  getMonthMeta,
+  getSystemDateIso,
+  getSystemMonthKey,
   INITIAL_MANAGER_PASSWORD_HASH,
   INITIAL_STAFF_RECORDS,
   RewardNumberEntry,
@@ -32,6 +36,7 @@ import {
   isSessionActive,
   OperationType,
   purgeStaleSessionsInDb,
+  reassignRewardEntryStaffInDb,
   registerActiveSessionInDb,
   removeActiveSessionInDb,
   sendActiveSessionHeartbeatInDb,
@@ -54,6 +59,7 @@ import {
   Clock,
   FileDown,
   LogOut,
+  RefreshCw,
   TrendingUp,
   Trophy
 } from 'lucide-react';
@@ -100,11 +106,43 @@ export default function App() {
   );
   const [isSessionRegistered, setIsSessionRegistered] = useState<boolean>(false);
 
-  const [selectedMonthKey, setSelectedMonthKey] = useState<string>('2026-10');
-  const [selectedDateIso, setSelectedDateIso] = useState<string>('2026-10-08');
+  // Synchronize initial month and date with current system time
+  const [selectedMonthKey, setSelectedMonthKey] = useState<string>(() => getSystemMonthKey());
+  const [selectedDateIso, setSelectedDateIso] = useState<string>(() => getSystemDateIso());
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isPdfDrawerOpen, setIsPdfDrawerOpen] = useState<boolean>(false);
   const [noticeBanner, setNoticeBanner] = useState<string | null>(null);
+
+  // Dynamically generated available months covering current year, system month, and any months with recorded entries
+  const availableMonths = useMemo(() => {
+    const entryMonthKeys = rewardEntries.map((e) => e.dateIso.slice(0, 7));
+    return generateAvailableMonths(entryMonthKeys);
+  }, [rewardEntries]);
+
+  const currentMonthMeta = useMemo(() => {
+    return availableMonths.find((m) => m.key === selectedMonthKey) || getMonthMeta(selectedMonthKey);
+  }, [availableMonths, selectedMonthKey]);
+
+  // Automatically keep date in sync with system date as time continues (e.g. midnight rollover)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const todayIso = getSystemDateIso();
+      const todayMonth = getSystemMonthKey();
+      // If the day changed and the user is on the previous day, smoothly roll to today
+      setSelectedDateIso((prevDate) => {
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yesterdayIso = getSystemDateIso(yesterday);
+        if (prevDate === yesterdayIso) {
+          setSelectedMonthKey(todayMonth);
+          return todayIso;
+        }
+        return prevDate;
+      });
+    }, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Connect to shared Cloud Firestore backend for real-time multi-workstation sync
   useEffect(() => {
@@ -377,16 +415,60 @@ export default function App() {
     );
   }
 
-  const currentMonthMeta =
-    AVAILABLE_MONTHS.find((m) => m.key === selectedMonthKey) || AVAILABLE_MONTHS[0];
-
   const handleMonthChange = (newMonthKey: string) => {
     setSelectedMonthKey(newMonthKey);
-    if (newMonthKey === '2026-10') {
-      setSelectedDateIso('2026-10-08');
+    const systemMonth = getSystemMonthKey();
+    if (newMonthKey === systemMonth) {
+      // If switching to current month, select today's system date
+      setSelectedDateIso(getSystemDateIso());
     } else {
-      setSelectedDateIso(`${newMonthKey}-28`);
+      // If switching to past or future month, default to day 1 of that month
+      setSelectedDateIso(`${newMonthKey}-01`);
     }
+  };
+
+  const handleSelectDateIso = (newDateIso: string) => {
+    setSelectedDateIso(newDateIso);
+    const newMonthKey = newDateIso.slice(0, 7);
+    if (newMonthKey && newMonthKey !== selectedMonthKey) {
+      setSelectedMonthKey(newMonthKey);
+    }
+  };
+
+  // User triggers manual app refresh & system date resync
+  const handleRefreshApp = async () => {
+    setIsRefreshing(true);
+    const todayIso = getSystemDateIso();
+    const todayMonth = getSystemMonthKey();
+
+    // 1. Re-sync with current system date and month
+    setSelectedMonthKey(todayMonth);
+    setSelectedDateIso(todayIso);
+
+    // 2. Renew keep-alive workstation heartbeat in Firestore
+    if (workstationSessionId) {
+      await sendActiveSessionHeartbeatInDb(workstationSessionId).catch(() => {});
+    }
+
+    // 3. Proactively clean up offline sessions
+    await purgeStaleSessionsInDb(rawActiveSessions).catch(() => {});
+
+    // 4. Trigger re-render of presence and charts
+    setHeartbeatTicker((prev) => prev + 1);
+
+    const nowTime = new Date().toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
+
+    setTimeout(() => {
+      setIsRefreshing(false);
+      setNoticeBanner(
+        `Application refreshed & synchronized to system date (${todayIso} at ${nowTime}).`
+      );
+      setTimeout(() => setNoticeBanner(null), 4500);
+    }, 500);
   };
 
   // Staff submits a new 16-digit Rewards Number with Reservation Number -> saved as 'pending' in Firestore
@@ -481,6 +563,29 @@ export default function App() {
     } else if (res.error) {
       setNoticeBanner(res.error);
       setTimeout(() => setNoticeBanner(null), 4000);
+    }
+    return res;
+  };
+
+  // Reassign / Transfer a Reward Entry to another staff member
+  const handleReassignRewardStaff = async (
+    entryId: string,
+    newStaffId: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    const targetStaff = staffRecords.find((s) => s.id === newStaffId);
+    if (!targetStaff) {
+      return { success: false, error: 'Target staff member was not found.' };
+    }
+
+    const res = await reassignRewardEntryStaffInDb(entryId, newStaffId);
+    if (res.success) {
+      setNoticeBanner(
+        `Reward entry successfully reassigned and credited to ${targetStaff.staffName} (${targetStaff.staffLoginId}). Synced to all workstations.`
+      );
+      setTimeout(() => setNoticeBanner(null), 5000);
+    } else if (res.error) {
+      setNoticeBanner(res.error);
+      setTimeout(() => setNoticeBanner(null), 5000);
     }
     return res;
   };
@@ -683,14 +788,28 @@ export default function App() {
           </span>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
+          {/* Refresh App Button */}
+          <button
+            type="button"
+            onClick={handleRefreshApp}
+            disabled={isRefreshing}
+            title="Refresh app data and sync with system date"
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-200 bg-slate-800 hover:bg-slate-700 hover:text-white border border-slate-700 rounded-lg transition-colors whitespace-nowrap cursor-pointer disabled:opacity-50"
+          >
+            <RefreshCw
+              className={`w-3.5 h-3.5 text-amber-400 ${isRefreshing ? 'animate-spin' : ''}`}
+            />
+            <span>{isRefreshing ? 'Refreshing...' : 'Refresh'}</span>
+          </button>
+
           <select
             value={selectedMonthKey}
             onChange={(e) => handleMonthChange(e.target.value)}
             aria-label="Select Month"
             className="px-3 py-2 text-xs font-semibold bg-slate-800 text-amber-300 border border-slate-700 rounded-lg focus:outline-none cursor-pointer"
           >
-            {AVAILABLE_MONTHS.map((m) => (
+            {availableMonths.map((m) => (
               <option key={m.key} value={m.key}>
                 {m.label}
               </option>
@@ -826,12 +945,13 @@ export default function App() {
           selectedMonthLabel={currentMonthMeta.label}
           daysInMonth={currentMonthMeta.daysInMonth}
           selectedDateIso={selectedDateIso}
-          onSelectDateIso={setSelectedDateIso}
+          onSelectDateIso={handleSelectDateIso}
           searchQuery={searchQuery}
           onSearchQueryChange={setSearchQuery}
           onSubmitStaffRewardNumber={handleSubmitStaffRewardNumber}
           onEditStaffRewardNumber={handleEditStaffRewardNumber}
           onDeleteStaffRewardNumber={handleDeleteStaffRewardNumber}
+          onReassignRewardStaff={handleReassignRewardStaff}
           onManagerDecision={handleManagerDecision}
           onManagerApproveAll={handleManagerApproveAll}
           onCreateStaffMember={handleCreateStaffMember}

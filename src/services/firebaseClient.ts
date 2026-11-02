@@ -405,7 +405,8 @@ export async function editRewardEntryInDb(
   entryId: string,
   newReservationNumber: string,
   newRewardsNumber: string,
-  newDateIso?: string
+  newDateIso?: string,
+  newStaffId?: string
 ): Promise<{ success: boolean; error?: string }> {
   const path = `reward_entries/${entryId}`;
   try {
@@ -437,11 +438,49 @@ export async function editRewardEntryInDb(
       updatePayload.dateIso = newDateIso.slice(0, 10);
     }
 
+    if (newStaffId && newStaffId.trim()) {
+      updatePayload.staffId = newStaffId.trim().slice(0, 64);
+    }
+
     await updateDoc(entryRef, updatePayload);
     return { success: true };
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, path);
     return { success: false, error: 'Failed to update entry in database.' };
+  }
+}
+
+// Reassign / transfer a reward entry to the correct staff member (can be pending or approved)
+export async function reassignRewardEntryStaffInDb(
+  entryId: string,
+  newStaffId: string
+): Promise<{ success: boolean; error?: string }> {
+  const cleanEntryId = entryId.trim();
+  const cleanStaffId = newStaffId.trim().slice(0, 64);
+  const path = `reward_entries/${cleanEntryId}`;
+
+  try {
+    const entryRef = doc(db, 'reward_entries', cleanEntryId);
+    const snap = await getDoc(entryRef);
+    if (!snap.exists()) {
+      return { success: false, error: 'Reward entry not found.' };
+    }
+
+    // Verify target staff member exists
+    const staffRef = doc(db, 'staff_members', cleanStaffId);
+    const staffSnap = await getDoc(staffRef);
+    if (!staffSnap.exists()) {
+      return { success: false, error: 'Target staff member does not exist.' };
+    }
+
+    await updateDoc(entryRef, {
+      staffId: cleanStaffId
+    });
+
+    return { success: true };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+    return { success: false, error: 'Failed to reassign reward entry in database.' };
   }
 }
 

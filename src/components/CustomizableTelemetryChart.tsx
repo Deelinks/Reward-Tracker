@@ -200,7 +200,11 @@ export const CustomizableTelemetryChart: React.FC<CustomizableTelemetryChartProp
   }, [staffTotals]);
 
   // Daily Trend Data for Selected Month
-  const activeDayRange = monthKey === '2026-10' ? 10 : daysInMonth;
+  const currentSystemMonth = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+  const isCurrentMonth = monthKey === currentSystemMonth;
+  const activeDayRange = isCurrentMonth
+    ? Math.min(daysInMonth, Math.max(currentDayNum + 2, 10))
+    : daysInMonth;
   const dailySeries = useMemo(() => {
     return Array.from({ length: activeDayRange }, (_, idx) => {
       const dayNum = idx + 1;

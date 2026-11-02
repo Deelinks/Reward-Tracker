@@ -122,8 +122,18 @@ export const AuthGatePage: React.FC<AuthGatePageProps> = ({
       >
         {/* Top Brand Header */}
         <div className="bg-slate-900 px-7 py-6 text-white border-b border-slate-800">
-          <div className="text-xs font-semibold text-amber-400 tracking-wide uppercase mb-1">
-            Front desk enrollment tracker
+          <div className="flex items-center justify-between text-xs font-semibold mb-1">
+            <span className="text-amber-400 tracking-wide uppercase">
+              Front desk enrollment tracker
+            </span>
+            <span className="text-slate-400 font-mono-tabular">
+              {new Date().toLocaleDateString('en-US', {
+                weekday: 'short',
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric'
+              })}
+            </span>
           </div>
           <h1 className="text-2xl font-semibold text-white font-display">
             Kimono
