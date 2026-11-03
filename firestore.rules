@@ -168,16 +168,16 @@ service cloud.firestore {
         (
           // Manager decision update (status, reviewedBy)
           incoming().diff(existing()).affectedKeys().hasOnly(['status', 'reviewedBy']) ||
-          // Reassign staffId (credit transfer by manager or staff)
+          // Manager/Admin reassigning staffId (credit transfer by admin only)
           incoming().diff(existing()).affectedKeys().hasOnly(['staffId']) ||
           incoming().diff(existing()).affectedKeys().hasOnly(['staffId', 'reviewedBy']) ||
           incoming().diff(existing()).affectedKeys().hasOnly(['staffId', 'status', 'reviewedBy']) ||
-          // User edit before approval (allowed only if currently not approved)
+          // User edit before approval (allowed only if currently not approved - staffId CANNOT be modified)
           (
             existing().status != 'approved' &&
             incoming().status == existing().status &&
-            incoming().diff(existing()).affectedKeys().hasAny(['reservationNumber', 'rewardsNumber', 'dateIso', 'timestamp', 'staffId']) &&
-            incoming().diff(existing()).affectedKeys().hasOnly(['reservationNumber', 'rewardsNumber', 'dateIso', 'timestamp', 'staffId'])
+            incoming().staffId == existing().staffId &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['reservationNumber', 'rewardsNumber', 'dateIso', 'timestamp'])
           )
         );
       allow delete: if isValidId(entryId) &&

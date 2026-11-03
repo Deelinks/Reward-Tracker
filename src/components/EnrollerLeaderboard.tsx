@@ -328,7 +328,7 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
     }
   };
 
-  // Open Reassign Modal for any entry (pending or approved)
+  // Open Reassign Modal for any entry (Admin / Manager only)
   const handleOpenReassignModal = (
     staffId: string,
     staffName: string,
@@ -342,6 +342,7 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
       status: string;
     }
   ) => {
+    if (session.role !== 'manager') return;
     setReassigningEntry({
       staffId,
       staffName,
@@ -358,9 +359,10 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
     setReassignModalError(null);
   };
 
-  // Confirm Reassign / Transfer entry to another staff member
+  // Confirm Reassign / Transfer entry to another staff member (Admin / Manager only)
   const handleConfirmReassign = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (session.role !== 'manager') return;
     if (!reassigningEntry || !targetReassignStaffId) return;
     if (targetReassignStaffId === reassigningEntry.staffId) {
       setReassignModalError('Please select a different staff member to credit this reward to.');
@@ -380,12 +382,12 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
     }
   };
 
-  // Handle Submitting a New Rewards Number + Reservation Number (Staff or Manager on Behalf)
+  // Handle Submitting a New Rewards Number + Reservation Number (Staff strictly credits own user)
   const handleStaffRewardSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const creditedStaffId =
       session.role === 'staff'
-        ? selectedEnrollerStaffId || session.staffId
+        ? session.staffId
         : selectedEnrollerStaffId || staffRecords[0]?.id;
 
     if (!creditedStaffId) {
@@ -810,82 +812,32 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
             )}
 
             <form onSubmit={handleStaffRewardSubmit} className="p-6">
-              {/* Enroller Credit Indicator & Quick Switcher */}
-              <div className="mb-5 p-3.5 bg-indigo-50/80 border border-indigo-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              {/* Enroller Credit Indicator (Strictly attributed to logged-in user account) */}
+              <div className="mb-5 p-3.5 bg-indigo-50/80 border border-indigo-200 rounded-xl flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2.5">
                   <div
                     className="w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs text-white shrink-0 shadow-xs"
                     style={{
                       backgroundColor:
-                        staffRecords.find(
-                          (s) => s.id === (selectedEnrollerStaffId || session.staffId)
-                        )?.avatarColor || '#4f46e5'
+                        staffRecords.find((s) => s.id === session.staffId)?.avatarColor || '#4f46e5'
                     }}
                   >
-                    {staffRecords
-                      .find((s) => s.id === (selectedEnrollerStaffId || session.staffId))
-                      ?.staffName.slice(0, 1) || 'S'}
+                    {session.staffName.slice(0, 1)}
                   </div>
                   <div>
                     <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
                       Credited Staff Member / Enroller
                     </div>
                     <div className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                      <span>
-                        {
-                          staffRecords.find(
-                            (s) => s.id === (selectedEnrollerStaffId || session.staffId)
-                          )?.staffName
-                        }
-                      </span>
+                      <span>{session.staffName}</span>
                       <span className="font-mono-tabular text-xs font-bold px-2 py-0.5 rounded bg-indigo-900 text-amber-300">
-                        {
-                          staffRecords.find(
-                            (s) => s.id === (selectedEnrollerStaffId || session.staffId)
-                          )?.staffLoginId
-                        }
+                        {session.staffLoginId}
                       </span>
-                      {(selectedEnrollerStaffId || session.staffId) === session.staffId ? (
-                        <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">
-                          Your Active Session
-                        </span>
-                      ) : (
-                        <span className="text-[11px] font-semibold text-amber-800 bg-amber-100 px-2 py-0.5 rounded">
-                          Crediting Colleague
-                        </span>
-                      )}
+                      <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">
+                        Your Active Session
+                      </span>
                     </div>
                   </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <label
-                    htmlFor="enroller-switcher-staff"
-                    className="text-xs font-semibold text-indigo-900 shrink-0"
-                  >
-                    Switch Enroller:
-                  </label>
-                  <select
-                    id="enroller-switcher-staff"
-                    value={selectedEnrollerStaffId || session.staffId}
-                    onChange={(e) => setSelectedEnrollerStaffId(e.target.value)}
-                    className="px-3 py-1.5 text-xs font-semibold bg-white border border-indigo-300 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
-                  >
-                    {staffRecords.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.staffName} ({s.staffLoginId}) {s.id === session.staffId ? '— (You)' : ''}
-                      </option>
-                    ))}
-                  </select>
-                  {selectedEnrollerStaffId && selectedEnrollerStaffId !== session.staffId && (
-                    <button
-                      type="button"
-                      onClick={() => setSelectedEnrollerStaffId(session.staffId)}
-                      className="text-[11px] font-semibold text-indigo-700 hover:underline cursor-pointer shrink-0"
-                    >
-                      Reset to Me
-                    </button>
-                  )}
                 </div>
               </div>
 
@@ -2254,8 +2206,7 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
                                         <span className="text-[11px] font-semibold text-emerald-700 flex items-center gap-1">
                                           <UserCheck className="w-3.5 h-3.5" /> Approved
                                         </span>
-                                        {(session.role === 'manager' ||
-                                          session.staffId === staff.id) && (
+                                        {session.role === 'manager' && (
                                           <button
                                             type="button"
                                             onClick={(e) => {
@@ -2268,7 +2219,7 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
                                               );
                                             }}
                                             className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 rounded cursor-pointer transition-colors"
-                                            title="Reassign / transfer this reward to another staff member"
+                                            title="Admin only: Reassign / transfer this reward to another staff member"
                                           >
                                             <ArrowRightLeft className="w-3 h-3" />
                                             <span>Reassign</span>
@@ -2277,7 +2228,7 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
                                       </div>
                                     ) : (
                                       <div className="flex items-center gap-1.5 flex-wrap justify-end">
-                                        {/* Edit, Reassign, & Delete for unapproved entry */}
+                                        {/* Edit, Reassign (Admin Only), & Delete for unapproved entry */}
                                         <button
                                           type="button"
                                           onClick={(e) => {
@@ -2291,23 +2242,25 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
                                           <span>Edit</span>
                                         </button>
 
-                                        <button
-                                          type="button"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            handleOpenReassignModal(
-                                              staff.id,
-                                              staff.staffName,
-                                              staff.staffLoginId,
-                                              entry
-                                            );
-                                          }}
-                                          className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 rounded cursor-pointer transition-colors"
-                                          title="Reassign / transfer this reward to another staff member"
-                                        >
-                                          <ArrowRightLeft className="w-3 h-3" />
-                                          <span>Reassign</span>
-                                        </button>
+                                        {session.role === 'manager' && (
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleOpenReassignModal(
+                                                staff.id,
+                                                staff.staffName,
+                                                staff.staffLoginId,
+                                                entry
+                                              );
+                                            }}
+                                            className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 rounded cursor-pointer transition-colors"
+                                            title="Admin only: Reassign / transfer this reward to another staff member"
+                                          >
+                                            <ArrowRightLeft className="w-3 h-3" />
+                                            <span>Reassign</span>
+                                          </button>
+                                        )}
 
                                         <button
                                           type="button"
@@ -2576,9 +2529,9 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
         )}
       </AnimatePresence>
 
-      {/* REASSIGN / TRANSFER REWARD ENTRY MODAL */}
+      {/* REASSIGN / TRANSFER REWARD ENTRY MODAL (Admin / Manager Only) */}
       <AnimatePresence>
-        {reassigningEntry && (
+        {session.role === 'manager' && reassigningEntry && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 10 }}

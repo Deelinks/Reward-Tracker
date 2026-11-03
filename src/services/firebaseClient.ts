@@ -405,8 +405,7 @@ export async function editRewardEntryInDb(
   entryId: string,
   newReservationNumber: string,
   newRewardsNumber: string,
-  newDateIso?: string,
-  newStaffId?: string
+  newDateIso?: string
 ): Promise<{ success: boolean; error?: string }> {
   const path = `reward_entries/${entryId}`;
   try {
@@ -436,10 +435,6 @@ export async function editRewardEntryInDb(
 
     if (newDateIso && /^\d{4}-\d{2}-\d{2}$/.test(newDateIso)) {
       updatePayload.dateIso = newDateIso.slice(0, 10);
-    }
-
-    if (newStaffId && newStaffId.trim()) {
-      updatePayload.staffId = newStaffId.trim().slice(0, 64);
     }
 
     await updateDoc(entryRef, updatePayload);

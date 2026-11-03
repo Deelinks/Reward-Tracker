@@ -567,11 +567,17 @@ export default function App() {
     return res;
   };
 
-  // Reassign / Transfer a Reward Entry to another staff member
+  // Reassign / Transfer a Reward Entry to another staff member (Admin / Manager only)
   const handleReassignRewardStaff = async (
     entryId: string,
     newStaffId: string
   ): Promise<{ success: boolean; error?: string }> => {
+    if (session?.role !== 'manager') {
+      return {
+        success: false,
+        error: 'Unauthorized: Only the admin / manager is allowed to reassign reward entries.'
+      };
+    }
     const targetStaff = staffRecords.find((s) => s.id === newStaffId);
     if (!targetStaff) {
       return { success: false, error: 'Target staff member was not found.' };
