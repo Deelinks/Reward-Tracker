@@ -156,6 +156,7 @@ export interface FirestoreStaffDoc {
   staffName: string;
   role: string;
   avatarColor: string;
+  avatarId?: string;
   monthlyGoal: number;
   dailyGoal: number;
   workspaceId: string;
@@ -584,6 +585,30 @@ export async function createStaffMemberInDb(
     await setDoc(doc(db, 'staff_members', id), payload);
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, `staff_members/${id}`);
+  }
+}
+
+// Manager or Staff member updates their custom Avatar and Accent Color
+export async function updateStaffAvatarInDb(
+  staffId: string,
+  newAvatarId: string,
+  newAvatarColor?: string
+): Promise<{ success: boolean; error?: string }> {
+  const cleanStaffId = staffId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+  const cleanAvatarId = newAvatarId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+  const updateData: Record<string, string> = {
+    avatarId: cleanAvatarId
+  };
+  if (newAvatarColor && /^#[0-9a-fA-F]{6}$/.test(newAvatarColor)) {
+    updateData.avatarColor = newAvatarColor;
+  }
+
+  try {
+    await updateDoc(doc(db, 'staff_members', cleanStaffId), updateData);
+    return { success: true };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `staff_members/${cleanStaffId}`);
+    return { success: false, error: 'Failed to update avatar in database.' };
   }
 }
 

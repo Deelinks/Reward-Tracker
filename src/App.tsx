@@ -14,6 +14,7 @@ import {
   getSystemMonthKey,
   INITIAL_MANAGER_PASSWORD_HASH,
   INITIAL_STAFF_RECORDS,
+  normalizeAvatarId,
   RewardNumberEntry,
   StaffMemberRecord
 } from './data/hotelLoyaltyData';
@@ -44,6 +45,7 @@ import {
   updateAllStaffMonthlyGoalsInDb,
   updateManagerPasswordInDb,
   updateRewardEntryStatusInDb,
+  updateStaffAvatarInDb,
   updateStaffLoginIdInDb,
   updateStaffMonthlyGoalInDb,
   updateStaffRoleInDb,
@@ -72,6 +74,7 @@ export default function App() {
       staffName: s.staffName,
       role: s.role,
       avatarColor: s.avatarColor,
+      avatarId: normalizeAvatarId(s.avatarId),
       monthlyGoal: s.monthlyGoal,
       dailyGoal: s.dailyGoal,
       workspaceId: WORKSPACE_ID
@@ -262,6 +265,7 @@ export default function App() {
       staffName: s.staffName,
       role: s.role,
       avatarColor: s.avatarColor,
+      avatarId: normalizeAvatarId(s.avatarId),
       monthlyGoal: s.monthlyGoal,
       dailyGoal: s.dailyGoal,
       entries: entriesForStaff
@@ -661,6 +665,23 @@ export default function App() {
     setTimeout(() => setNoticeBanner(null), 5000);
   };
 
+  // Staff or Manager Updates Staff Member's 3D Avatar & Color in Firestore
+  const handleUpdateStaffAvatar = async (
+    staffId: string,
+    avatarId: string,
+    avatarColor?: string
+  ) => {
+    const res = await updateStaffAvatarInDb(staffId, avatarId, avatarColor);
+    if (res.success) {
+      const target = staffRecords.find((s) => s.id === staffId);
+      setNoticeBanner(
+        `Avatar for ${target?.staffName || 'staff member'} updated and synced to all workstations!`
+      );
+      setTimeout(() => setNoticeBanner(null), 4000);
+    }
+    return res;
+  };
+
   // Manager Updates Role / Title for a Staff Member in Firestore
   const handleUpdateStaffRole = async (staffId: string, newRole: string) => {
     const target = staffRecords.find((s) => s.id === staffId);
@@ -971,6 +992,7 @@ export default function App() {
           activeSessions={activeSessions}
           currentWorkstationSessionId={workstationSessionId}
           onForceSignOutSession={handleManagerForceSignOutUser}
+          onUpdateStaffAvatar={handleUpdateStaffAvatar}
         />
 
         {/* Visual Bar & Daily Trend Chart */}

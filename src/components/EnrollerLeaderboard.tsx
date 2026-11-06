@@ -2,27 +2,36 @@ import React, { useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   getSystemDateIso,
+  getWeekRangeMeta,
   StaffMemberRecord
 } from '../data/hotelLoyaltyData';
 import { FirestoreActiveSessionDoc, hashManagerPassword } from '../services/firebaseClient';
+import { Staff3DAvatar, AvatarSelectionModal } from './Staff3DAvatar';
+import { RankingReportModal } from './RankingReportModal';
 import {
   ArrowRightLeft,
   ArrowUpDown,
+  Award,
   Calendar,
   Check,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
   Clock,
+  Crown,
+  FileSpreadsheet,
+  FileText,
   Hash,
   KeyRound,
   Lock,
   LogOut,
+  Palette,
   Pencil,
   Plus,
   RefreshCw,
   Search,
   ShieldCheck,
+  Sparkles,
   Trash2,
   Trophy,
   UserCheck,
@@ -86,6 +95,11 @@ interface EnrollerLeaderboardProps {
   activeSessions: FirestoreActiveSessionDoc[];
   currentWorkstationSessionId: string;
   onForceSignOutSession: (targetSession: FirestoreActiveSessionDoc) => void;
+  onUpdateStaffAvatar: (
+    staffId: string,
+    avatarId: string,
+    avatarColor?: string
+  ) => Promise<{ success: boolean; error?: string }>;
 }
 
 type SortMode = 'monthTotal' | 'dayTotal' | 'pendingCount';
@@ -117,7 +131,8 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
   onClearAllEntries,
   activeSessions,
   currentWorkstationSessionId,
-  onForceSignOutSession
+  onForceSignOutSession,
+  onUpdateStaffAvatar
 }) => {
   // Manager Console Active Tab ('approvals' | 'recordReward' | 'manageStaff' | 'signedInUsers' | 'security')
   const [managerTab, setManagerTab] = useState<
@@ -173,6 +188,21 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
   const [targetReassignStaffId, setTargetReassignStaffId] = useState<string>('');
   const [reassignModalError, setReassignModalError] = useState<string | null>(null);
   const [isSubmittingReassign, setIsSubmittingReassign] = useState<boolean>(false);
+
+  // Leaderboard Ranking Timeframe ('daily' | 'weekly' | 'monthly')
+  const [rankingTimeframe, setRankingTimeframe] = useState<'daily' | 'weekly' | 'monthly'>('monthly');
+
+  // Daily & Weekly Ranking Report Modal State
+  const [isRankingReportOpen, setIsRankingReportOpen] = useState<boolean>(false);
+
+  // Avatar Selection Modal State
+  const [isAvatarModalOpen, setIsAvatarModalOpen] = useState<boolean>(false);
+  const [avatarModalStaff, setAvatarModalStaff] = useState<StaffMemberRecord | null>(null);
+
+  const handleOpenAvatarModal = (staff: StaffMemberRecord) => {
+    setAvatarModalStaff(staff);
+    setIsAvatarModalOpen(true);
+  };
 
   // Leaderboard Sorting & Expanded Row
   const [sortMode, setSortMode] = useState<SortMode>('monthTotal');
@@ -612,7 +642,10 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
       }))
   );
 
-  // Compute daily and monthly APPROVED counts for each staff member
+  // Active week range meta for weekly ranking & reports
+  const weekRange = getWeekRangeMeta(selectedDateIso);
+
+  // Compute daily, weekly, and monthly APPROVED counts for each staff member
   const computedStaff = staffRecords.map((staff) => {
     const monthApproved = staff.entries.filter(
       (e) => e.dateIso.startsWith(selectedMonthKey) && e.status === 'approved'
@@ -623,6 +656,30 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
     const dayApproved = staff.entries.filter(
       (e) => e.dateIso === selectedDateIso && e.status === 'approved'
     );
+    const weekApproved = staff.entries.filter(
+      (e) => weekRange.days.includes(e.dateIso) && e.status === 'approved'
+    );
+
+    const weeklyGoal = Math.max(
+      1,
+      Math.round(staff.monthlyGoal / 4) || (staff.dailyGoal || 2) * 6
+    );
+
+    const timeframeApprovedCount =
+      rankingTimeframe === 'daily'
+        ? dayApproved.length
+        : rankingTimeframe === 'weekly'
+        ? weekApproved.length
+        : monthApproved.length;
+
+    const timeframeGoal =
+      rankingTimeframe === 'daily'
+        ? (staff.dailyGoal || 2)
+        : rankingTimeframe === 'weekly'
+        ? weeklyGoal
+        : staff.monthlyGoal;
+
+    const attainmentPct = Math.round((timeframeApprovedCount / (timeframeGoal || 1)) * 100);
 
     const dailyApprovedMap: Record<number, number> = {};
     for (let d = 1; d <= daysInMonth; d++) {
@@ -640,18 +697,27 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
       monthApprovedCount: monthApproved.length,
       monthPendingCount: monthPending.length,
       dayApprovedCount: dayApproved.length,
+      weekApprovedCount: weekApproved.length,
+      weeklyGoal,
+      timeframeApprovedCount,
+      timeframeGoal,
+      attainmentPct,
       dailyApprovedMap,
       monthEntries: staff.entries.filter((e) => e.dateIso.startsWith(selectedMonthKey))
     };
   });
 
-  // Top 3 Leaderboard Champions
+  // Top 3 Leaderboard Champions dynamically sorted by the active ranking timeframe (Daily, Weekly, or Monthly)
   const topThreeChampions = [...computedStaff]
-    .sort((a, b) =>
-      b.monthApprovedCount !== a.monthApprovedCount
-        ? b.monthApprovedCount - a.monthApprovedCount
-        : b.dayApprovedCount - a.dayApprovedCount
-    )
+    .sort((a, b) => {
+      if (b.timeframeApprovedCount !== a.timeframeApprovedCount) {
+        return b.timeframeApprovedCount - a.timeframeApprovedCount;
+      }
+      if (b.monthApprovedCount !== a.monthApprovedCount) {
+        return b.monthApprovedCount - a.monthApprovedCount;
+      }
+      return b.dayApprovedCount - a.dayApprovedCount;
+    })
     .slice(0, 3);
 
   const filteredStaff = computedStaff
@@ -711,42 +777,73 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
       <section className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs">
         {session.role === 'staff' ? (
           /* LOGGED-IN STAFF WORKSPACE: SUBMIT RESERVATION NUMBER & REWARDS NUMBER + CHANGE OWN AUR- ID */
-          <div>
-            <div className="bg-indigo-950 text-white px-6 py-4 flex flex-wrap items-center justify-between gap-4">
+          (() => {
+            const currentLoggedInStaff = staffRecords.find((s) => s.id === session.staffId);
+            return (
               <div>
-                <h2 className="text-lg font-semibold">
-                  Welcome, {session.staffName} · Daily Rewards Number Entry
-                </h2>
-                <p className="text-xs text-indigo-200">
-                  Enter the Reservation Number and 16-digit Guest Rewards Number below. Entries
-                  require Manager approval.
-                </p>
-              </div>
+                <div className="bg-indigo-950 text-white px-6 py-4 flex flex-wrap items-center justify-between gap-4">
+                  <div className="flex items-center gap-3.5">
+                    {currentLoggedInStaff && (
+                      <Staff3DAvatar
+                        avatarId={currentLoggedInStaff.avatarId}
+                        avatarColor={currentLoggedInStaff.avatarColor}
+                        staffName={currentLoggedInStaff.staffName}
+                        size="md"
+                        withRing={true}
+                        ringTier="gold"
+                        interactive={true}
+                        onClick={() => handleOpenAvatarModal(currentLoggedInStaff)}
+                      />
+                    )}
+                    <div>
+                      <h2 className="text-lg font-semibold flex items-center gap-2">
+                        <span>Welcome, {session.staffName}</span>
+                        <span className="text-xs px-2 py-0.5 rounded-md bg-amber-400 text-slate-950 font-bold font-mono-tabular">
+                          {session.staffLoginId}
+                        </span>
+                      </h2>
+                      <p className="text-xs text-indigo-200">
+                        Enter the Reservation Number and 16-digit Guest Rewards Number below. Entries
+                        require Manager approval.
+                      </p>
+                    </div>
+                  </div>
 
-              <div className="flex items-center gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsStaffChangingOwnId(!isStaffChangingOwnId);
-                    setStaffCustomSuffixInput('');
-                    setStaffOwnIdError(null);
-                  }}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold bg-amber-400 hover:bg-amber-500 text-slate-950 rounded-lg cursor-pointer transition-colors"
-                >
-                  <KeyRound className="w-3.5 h-3.5" />
-                  <span>{isStaffChangingOwnId ? 'Close ID Editor' : 'Change My Staff ID'}</span>
-                </button>
+                  <div className="flex items-center gap-2.5">
+                    {currentLoggedInStaff && (
+                      <button
+                        type="button"
+                        onClick={() => handleOpenAvatarModal(currentLoggedInStaff)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-indigo-900/90 hover:bg-indigo-850 text-amber-300 border border-indigo-700 rounded-lg cursor-pointer transition-colors shadow-xs"
+                      >
+                        <Palette className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Choose My Avatar</span>
+                      </button>
+                    )}
 
-                <button
-                  type="button"
-                  onClick={onLogout}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold bg-white/10 hover:bg-white/20 text-white rounded-lg cursor-pointer"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                  <span>Sign Out</span>
-                </button>
-              </div>
-            </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsStaffChangingOwnId(!isStaffChangingOwnId);
+                        setStaffCustomSuffixInput('');
+                        setStaffOwnIdError(null);
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold bg-amber-400 hover:bg-amber-500 text-slate-950 rounded-lg cursor-pointer transition-colors shadow-xs"
+                    >
+                      <KeyRound className="w-3.5 h-3.5" />
+                      <span>{isStaffChangingOwnId ? 'Close ID Editor' : 'Change My Staff ID'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={onLogout}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold bg-white/10 hover:bg-white/20 text-white rounded-lg cursor-pointer"
+                    >
+                      <LogOut className="w-3.5 h-3.5" />
+                      <span>Sign Out</span>
+                    </button>
+                  </div>
+                </div>
 
             {isStaffChangingOwnId && (
               <div className="bg-indigo-50/90 border-b border-indigo-200 px-6 py-4">
@@ -961,6 +1058,8 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
               )}
             </form>
           </div>
+            );
+          })()
         ) : (
           /* LOGGED-IN MANAGER WORKSPACE: APPROVE ENTRIES, CREATE/RESET STAFF IDS, CHANGE PASSWORD */
           <div>
@@ -1444,10 +1543,29 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
                           key={s.id}
                           className="p-3.5 border border-slate-200 rounded-lg bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                         >
-                          <div className="min-w-0">
-                            <div className="font-semibold text-slate-900 text-sm truncate">
-                              {s.staffName}
-                            </div>
+                          <div className="flex items-center gap-3 min-w-0">
+                            <Staff3DAvatar
+                              avatarId={s.avatarId}
+                              avatarColor={s.avatarColor}
+                              staffName={s.staffName}
+                              size="sm"
+                              withRing={true}
+                              interactive={true}
+                              onClick={() => handleOpenAvatarModal(s)}
+                            />
+                            <div className="min-w-0">
+                              <div className="font-semibold text-slate-900 text-sm truncate flex items-center gap-2">
+                                <span>{s.staffName}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenAvatarModal(s)}
+                                  className="text-[11px] text-indigo-600 hover:text-indigo-800 font-semibold cursor-pointer inline-flex items-center gap-1"
+                                  title="Customize 3D Avatar"
+                                >
+                                  <Palette className="w-3 h-3 text-amber-500" />
+                                  <span>Avatar</span>
+                                </button>
+                              </div>
                             {isEditingRole ? (
                               <div className="mt-1 flex items-center gap-1 bg-slate-50 p-1 rounded border border-slate-300">
                                 <input
@@ -1501,8 +1619,9 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
                               </div>
                             )}
                           </div>
+                        </div>
 
-                          <div className="flex flex-wrap items-center gap-2 shrink-0">
+                        <div className="flex flex-wrap items-center gap-2 shrink-0">
                             {/* Monthly Goal Editor per Staff */}
                             {isEditingGoal ? (
                               <div className="flex items-center gap-1 bg-amber-50 p-1 rounded border border-amber-300">
@@ -1828,21 +1947,82 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
       </section>
 
       {/* SECTION 2: SIMPLE-TO-READ LEADERBOARD & DAILY COUNT PER MONTH */}
-      <section className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-5 border-b border-slate-200">
+      <section className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+        {/* LEADERBOARD TOP CONTROL BAR */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-6 border-b border-slate-200">
           <div>
             <div className="flex items-center gap-2 text-xs text-indigo-700 font-semibold mb-1">
-              <span>Manager-Verified Standings</span>
+              <span className="px-2 py-0.5 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-800 text-[11px] font-bold">
+                Manager-Verified Standings
+              </span>
               <span aria-hidden="true">·</span>
-              <span>{selectedMonthLabel}</span>
+              <span className="text-slate-600">
+                {rankingTimeframe === 'daily'
+                  ? `Daily View · ${selectedDateIso}`
+                  : rankingTimeframe === 'weekly'
+                  ? `Weekly View · ${weekRange.shortLabel} (${weekRange.label})`
+                  : `Monthly View · ${selectedMonthLabel}`}
+              </span>
             </div>
-            <h2 className="text-xl font-semibold text-slate-900 flex items-center gap-2">
-              <Trophy className="w-5 h-5 text-amber-500" />
-              <span>Staff Leaderboard (Approved Rewards Per Day in {selectedMonthLabel})</span>
+            <h2 className="text-xl font-bold text-slate-950 flex items-center gap-2 tracking-tight">
+              <Trophy className="w-5 h-5 text-amber-500 shrink-0" />
+              <span>Kimono Staff 3D Load-Board & Real-Time Rankings</span>
             </h2>
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5 no-print">
+            {/* Dedicated Daily & Weekly Ranking Report Modal Trigger */}
+            <button
+              type="button"
+              onClick={() => setIsRankingReportOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-500 hover:to-amber-600 rounded-xl shadow-xs hover:shadow-md transition-all cursor-pointer border border-amber-300"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              <span>Daily &amp; Weekly Ranking Report</span>
+              <span className="w-2 h-2 rounded-full bg-slate-950 animate-pulse ml-0.5" />
+            </button>
+
+            {/* 3D Segmented Timeframe Switcher */}
+            <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 shadow-inner">
+              <button
+                type="button"
+                onClick={() => setRankingTimeframe('daily')}
+                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1 ${
+                  rankingTimeframe === 'daily'
+                    ? 'bg-white text-indigo-900 shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Calendar className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Daily</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setRankingTimeframe('weekly')}
+                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1 ${
+                  rankingTimeframe === 'weekly'
+                    ? 'bg-white text-indigo-900 shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Trophy className="w-3.5 h-3.5 text-amber-500" />
+                <span>Weekly ({weekRange.shortLabel})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setRankingTimeframe('monthly')}
+                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1 ${
+                  rankingTimeframe === 'monthly'
+                    ? 'bg-white text-indigo-900 shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Award className="w-3.5 h-3.5 text-indigo-600" />
+                <span>Monthly</span>
+              </button>
+            </div>
+
+            {/* Search Input */}
             <div className="relative">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
@@ -1850,107 +2030,257 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
                 value={searchQuery}
                 onChange={(e) => onSearchQueryChange(e.target.value)}
                 placeholder="Search staff, RES-#, or 601599..."
-                className="pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-lg bg-white text-slate-900 w-60"
+                className="pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-xl bg-white text-slate-900 w-52 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-inner"
               />
-            </div>
-
-            <div className="flex items-center bg-slate-100 p-1 rounded-lg border border-slate-200">
-              <button
-                type="button"
-                onClick={() => handleSortClick('monthTotal')}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-md cursor-pointer ${
-                  sortMode === 'monthTotal'
-                    ? 'bg-indigo-600 text-white'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Sort by Month Total
-              </button>
-              <button
-                type="button"
-                onClick={() => handleSortClick('dayTotal')}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-md cursor-pointer ${
-                  sortMode === 'dayTotal'
-                    ? 'bg-indigo-600 text-white'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Sort by Day ({selectedDateIso.slice(5)})
-              </button>
             </div>
           </div>
         </div>
 
-        {/* TOP 3 PODIUM CARDS */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 my-6">
-          {topThreeChampions.map((champ, idx) => {
-            const rank = idx + 1;
-            const theme =
-              rank === 1
-                ? 'border-amber-400 bg-amber-50/50'
-                : rank === 2
-                ? 'border-indigo-300 bg-indigo-50/40'
-                : 'border-teal-300 bg-teal-50/40';
+        {/* 3D TIERED OLYMPIC PODIUM STAGE */}
+        <div className="relative my-8 pt-2 pb-6 px-2 sm:px-4">
+          {/* Ambient Lighting Behind Stage */}
+          <div className="absolute inset-x-8 top-10 h-40 bg-gradient-to-r from-indigo-500/10 via-amber-400/20 to-purple-500/10 blur-3xl rounded-full pointer-events-none" />
 
-            return (
-              <div
-                key={champ.id}
-                onClick={() => setExpandedStaffId(champ.id)}
-                className={`border-2 ${theme} rounded-xl p-5 cursor-pointer hover:shadow-xs transition-all`}
-              >
-                <div className="flex items-center justify-between text-xs font-semibold text-slate-600 mb-3">
-                  <span className="text-slate-900">
-                    {rank === 1
-                      ? '1st Place · Gold Leader'
-                      : rank === 2
-                      ? '2nd Place · Silver'
-                      : '3rd Place · Bronze'}
-                  </span>
-                  {session.role === 'manager' && (
-                    <span className="font-mono-tabular text-slate-500">ID: {champ.staffLoginId}</span>
-                  )}
-                </div>
+          {/* Timeframe Ranking Banner */}
+          <div className="text-center mb-6">
+            <span className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full text-xs font-bold bg-slate-900 text-amber-400 shadow-md">
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              <span>
+                {rankingTimeframe === 'daily'
+                  ? `Today's Daily Podium Champions · ${selectedDateIso}`
+                  : rankingTimeframe === 'weekly'
+                  ? `Weekly Podium Champions · ${weekRange.shortLabel} (${weekRange.label})`
+                  : `Month of ${selectedMonthLabel} · All-Time Podium Leaders`}
+              </span>
+            </span>
+          </div>
 
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div
-                      className="w-11 h-11 rounded-lg flex items-center justify-center text-white font-bold text-sm"
-                      style={{ backgroundColor: champ.avatarColor }}
-                    >
-                      {champ.staffName.slice(0, 2).toUpperCase()}
+          <div className="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-6 items-end">
+            {/* 2ND PLACE — SILVER PEDESTAL (LEFT) */}
+            {topThreeChampions[1] && (() => {
+              const champ2 = topThreeChampions[1];
+              return (
+                <div
+                  key={champ2.id}
+                  onClick={() => setExpandedStaffId(champ2.id)}
+                  className="group relative cursor-pointer transform hover:-translate-y-2 transition-all duration-300"
+                >
+                  <div
+                    className="bg-gradient-to-t from-slate-200 via-slate-100 to-white rounded-2xl p-5 border-t-2 border-white/90 text-center relative flex flex-col items-center"
+                    style={{
+                      boxShadow: '0 12px 0 0 #64748b, 0 20px 28px rgba(71,85,105,0.3)'
+                    }}
+                  >
+                    {/* Silver Badge */}
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-200 text-slate-800 text-[11px] font-black shadow-xs border border-slate-300 mb-3 uppercase tracking-wider">
+                      <Award className="w-3.5 h-3.5 text-slate-600" />
+                      <span>#2 Silver</span>
                     </div>
-                    <div>
-                      <div className="text-lg font-bold text-slate-900">{champ.staffName}</div>
-                      <div className="text-xs text-slate-500">{champ.role}</div>
+
+                    {/* 3D Avatar */}
+                    <div className="relative mb-3">
+                      <Staff3DAvatar
+                        avatarId={champ2.avatarId}
+                        avatarColor={champ2.avatarColor}
+                        staffName={champ2.staffName}
+                        size="lg"
+                        withRing={true}
+                        ringTier="silver"
+                        interactive={true}
+                        onClick={() => handleOpenAvatarModal(champ2)}
+                      />
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenAvatarModal(champ2);
+                        }}
+                        title="Customize Avatar"
+                        className="absolute -bottom-1 -right-1 p-1 rounded-full bg-white text-slate-700 shadow-md border border-slate-200 hover:bg-slate-50 transition-colors"
+                      >
+                        <Palette className="w-3 h-3 text-indigo-600" />
+                      </button>
+                    </div>
+
+                    <h3 className="text-base font-extrabold text-slate-900 group-hover:text-indigo-900 transition-colors">
+                      {champ2.staffName}
+                    </h3>
+                    <p className="text-[11px] text-slate-500 font-medium truncate max-w-[180px]">
+                      {champ2.role}
+                    </p>
+
+                    {/* 3D Stat Embossed Counter */}
+                    <div className="mt-4 pt-3 border-t border-slate-200/80 w-full flex flex-col items-center">
+                      <div className="text-3xl font-black font-mono-tabular text-slate-800">
+                        {champ2.timeframeApprovedCount}
+                      </div>
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                        {rankingTimeframe === 'daily'
+                          ? 'Approved Today'
+                          : rankingTimeframe === 'weekly'
+                          ? 'Approved in Week'
+                          : 'Approved in Month'}
+                      </div>
+                      <div className="mt-2 text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-slate-200/80 text-slate-800">
+                        {champ2.attainmentPct}% of {champ2.timeframeGoal} Goal
+                      </div>
                     </div>
                   </div>
+                </div>
+              );
+            })()}
 
-                  <div className="text-right">
-                    <div className="text-2xl font-bold font-mono-tabular text-slate-900">
-                      {champ.monthApprovedCount}
+            {/* 1ST PLACE — GOLD PEDESTAL (CENTER — HIGHEST ELEVATION) */}
+            {topThreeChampions[0] && (() => {
+              const champ1 = topThreeChampions[0];
+              return (
+                <div
+                  key={champ1.id}
+                  onClick={() => setExpandedStaffId(champ1.id)}
+                  className="group relative cursor-pointer transform hover:-translate-y-2.5 transition-all duration-300 md:-translate-y-3"
+                >
+                  {/* Glowing Aura Ring */}
+                  <div className="absolute -inset-1 bg-gradient-to-r from-amber-400 via-yellow-300 to-amber-500 rounded-3xl blur-md opacity-40 group-hover:opacity-75 transition duration-500 pointer-events-none" />
+
+                  <div
+                    className="bg-gradient-to-t from-amber-100 via-amber-50/90 to-white rounded-3xl p-6 border-2 border-amber-300 text-center relative flex flex-col items-center"
+                    style={{
+                      boxShadow: '0 18px 0 0 #b45309, 0 30px 42px rgba(180,83,9,0.38)'
+                    }}
+                  >
+                    {/* Gold Crown Badge */}
+                    <div className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-gradient-to-r from-amber-400 to-amber-500 text-slate-950 text-xs font-black shadow-md border border-amber-300 mb-3.5 uppercase tracking-wider">
+                      <Crown className="w-4 h-4 fill-slate-950 text-slate-950" />
+                      <span>#1 Gold Champion</span>
                     </div>
-                    <div className="text-[11px] text-slate-500">Approved in Month</div>
+
+                    {/* 3D Avatar with Gold Halos */}
+                    <div className="relative mb-3">
+                      <Staff3DAvatar
+                        avatarId={champ1.avatarId}
+                        avatarColor={champ1.avatarColor}
+                        staffName={champ1.staffName}
+                        size="xl"
+                        withRing={true}
+                        ringTier="gold"
+                        interactive={true}
+                        onClick={() => handleOpenAvatarModal(champ1)}
+                      />
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenAvatarModal(champ1);
+                        }}
+                        title="Customize Avatar"
+                        className="absolute -bottom-1 -right-1 p-1.5 rounded-full bg-amber-400 text-slate-950 shadow-md border border-amber-300 hover:bg-amber-300 transition-colors"
+                      >
+                        <Palette className="w-3.5 h-3.5 text-slate-950" />
+                      </button>
+                    </div>
+
+                    <h3 className="text-xl font-extrabold text-slate-950 group-hover:text-amber-900 transition-colors">
+                      {champ1.staffName}
+                    </h3>
+                    <p className="text-xs text-amber-900/80 font-semibold truncate max-w-[200px]">
+                      {champ1.role}
+                    </p>
+
+                    {/* 3D Stat Embossed Counter */}
+                    <div className="mt-4 pt-3 border-t border-amber-200/80 w-full flex flex-col items-center">
+                      <div className="text-4xl font-black font-mono-tabular text-amber-950 drop-shadow-xs">
+                        {champ1.timeframeApprovedCount}
+                      </div>
+                      <div className="text-[11px] font-extrabold uppercase tracking-wider text-amber-900">
+                        {rankingTimeframe === 'daily'
+                          ? 'Approved Today'
+                          : rankingTimeframe === 'weekly'
+                          ? 'Approved in Week'
+                          : 'Approved in Month'}
+                      </div>
+                      <div className="mt-2 text-xs font-bold px-3 py-1 rounded-full bg-amber-400/30 text-amber-950 border border-amber-400/50">
+                        {champ1.attainmentPct}% of {champ1.timeframeGoal} Goal
+                      </div>
+                    </div>
                   </div>
                 </div>
+              );
+            })()}
 
-                <div className="mt-4 pt-3 border-t border-slate-200/80 flex items-center justify-between text-xs">
-                  <span>
-                    Today ({selectedDateIso.slice(5)}):{' '}
-                    <strong className="font-mono-tabular text-emerald-700">
-                      {champ.dayApprovedCount} approved
-                    </strong>
-                  </span>
-                  {champ.monthPendingCount > 0 ? (
-                    <span className="text-amber-700 font-semibold font-mono-tabular">
-                      {champ.monthPendingCount} awaiting approval
-                    </span>
-                  ) : (
-                    <span className="text-emerald-700 font-medium">All verified</span>
-                  )}
+            {/* 3RD PLACE — BRONZE PEDESTAL (RIGHT) */}
+            {topThreeChampions[2] && (() => {
+              const champ3 = topThreeChampions[2];
+              return (
+                <div
+                  key={champ3.id}
+                  onClick={() => setExpandedStaffId(champ3.id)}
+                  className="group relative cursor-pointer transform hover:-translate-y-2 transition-all duration-300"
+                >
+                  <div
+                    className="bg-gradient-to-t from-orange-100 via-orange-50/70 to-white rounded-2xl p-5 border-t-2 border-white/90 text-center relative flex flex-col items-center"
+                    style={{
+                      boxShadow: '0 10px 0 0 #9a3412, 0 16px 24px rgba(154,52,18,0.28)'
+                    }}
+                  >
+                    {/* Bronze Badge */}
+                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-orange-200 text-orange-950 text-[11px] font-black shadow-xs border border-orange-300 mb-3 uppercase tracking-wider">
+                      <Sparkles className="w-3.5 h-3.5 text-orange-800" />
+                      <span>#3 Bronze</span>
+                    </div>
+
+                    {/* 3D Avatar */}
+                    <div className="relative mb-3">
+                      <Staff3DAvatar
+                        avatarId={champ3.avatarId}
+                        avatarColor={champ3.avatarColor}
+                        staffName={champ3.staffName}
+                        size="lg"
+                        withRing={true}
+                        ringTier="bronze"
+                        interactive={true}
+                        onClick={() => handleOpenAvatarModal(champ3)}
+                      />
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenAvatarModal(champ3);
+                        }}
+                        title="Customize Avatar"
+                        className="absolute -bottom-1 -right-1 p-1 rounded-full bg-white text-slate-700 shadow-md border border-slate-200 hover:bg-slate-50 transition-colors"
+                      >
+                        <Palette className="w-3 h-3 text-orange-700" />
+                      </button>
+                    </div>
+
+                    <h3 className="text-base font-extrabold text-slate-900 group-hover:text-orange-900 transition-colors">
+                      {champ3.staffName}
+                    </h3>
+                    <p className="text-[11px] text-slate-500 font-medium truncate max-w-[180px]">
+                      {champ3.role}
+                    </p>
+
+                    {/* 3D Stat Embossed Counter */}
+                    <div className="mt-4 pt-3 border-t border-orange-200/80 w-full flex flex-col items-center">
+                      <div className="text-3xl font-black font-mono-tabular text-orange-950">
+                        {champ3.timeframeApprovedCount}
+                      </div>
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-orange-900">
+                        {rankingTimeframe === 'daily'
+                          ? 'Approved Today'
+                          : rankingTimeframe === 'weekly'
+                          ? 'Approved in Week'
+                          : 'Approved in Month'}
+                      </div>
+                      <div className="mt-2 text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-orange-200/80 text-orange-950">
+                        {champ3.attainmentPct}% of {champ3.timeframeGoal} Goal
+                      </div>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })()}
+          </div>
         </div>
 
         {/* CLEAN LEADERBOARD TABLE */}
@@ -2025,8 +2355,20 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
                           : 'hover:bg-slate-50/80'
                       }`}
                     >
-                      <td className="py-3.5 pl-3 pr-2 font-mono-tabular font-bold text-slate-700">
-                        #{idx + 1}
+                      <td className="py-3.5 pl-3 pr-2 text-center">
+                        <span
+                          className={`inline-flex items-center justify-center w-7 h-7 rounded-xl font-mono-tabular font-bold text-xs shadow-xs border ${
+                            idx === 0
+                              ? 'bg-amber-400 text-slate-950 border-amber-300 ring-2 ring-amber-300/60'
+                              : idx === 1
+                              ? 'bg-slate-300 text-slate-900 border-slate-200 ring-2 ring-slate-200'
+                              : idx === 2
+                              ? 'bg-orange-300 text-orange-950 border-orange-200 ring-2 ring-orange-200'
+                              : 'bg-slate-100 text-slate-700 border-slate-200'
+                          }`}
+                        >
+                          #{idx + 1}
+                        </span>
                       </td>
                       {session.role === 'manager' && (
                         <td className="py-3.5 px-2 font-mono-tabular text-xs font-semibold text-slate-500">
@@ -2034,12 +2376,31 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
                         </td>
                       )}
                       <td className="py-3.5 pr-4 font-semibold text-slate-900">
-                        {staff.staffName}
-                        {isCurrentStaff && (
-                          <span className="ml-2 text-xs font-semibold text-indigo-700">
-                            (You)
-                          </span>
-                        )}
+                        <div className="flex items-center gap-3">
+                          <Staff3DAvatar
+                            avatarId={staff.avatarId}
+                            avatarColor={staff.avatarColor}
+                            staffName={staff.staffName}
+                            size="sm"
+                            withRing={idx < 3}
+                            ringTier={idx === 0 ? 'gold' : idx === 1 ? 'silver' : idx === 2 ? 'bronze' : 'none'}
+                            interactive={true}
+                            onClick={() => handleOpenAvatarModal(staff)}
+                          />
+                          <div>
+                            <div className="flex items-center gap-1.5">
+                              <span>{staff.staffName}</span>
+                              {isCurrentStaff && (
+                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800">
+                                  You
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-slate-500 font-normal">
+                              {staff.role}
+                            </div>
+                          </div>
+                        </div>
                       </td>
 
                       {visibleDays.map((dayNum) => {
@@ -2651,6 +3012,29 @@ export const EnrollerLeaderboard: React.FC<EnrollerLeaderboardProps> = ({
           </div>
         )}
       </AnimatePresence>
+
+      {/* Daily & Weekly Ranking Report Modal */}
+      <RankingReportModal
+        isOpen={isRankingReportOpen}
+        onClose={() => setIsRankingReportOpen(false)}
+        staffRecords={staffRecords}
+        selectedDateIso={selectedDateIso}
+        selectedMonthKey={selectedMonthKey}
+        selectedMonthLabel={selectedMonthLabel}
+      />
+
+      {/* Select 3D Avatar Modal */}
+      {avatarModalStaff && (
+        <AvatarSelectionModal
+          isOpen={isAvatarModalOpen}
+          onClose={() => {
+            setIsAvatarModalOpen(false);
+            setAvatarModalStaff(null);
+          }}
+          staff={avatarModalStaff}
+          onSaveAvatar={onUpdateStaffAvatar}
+        />
+      )}
     </div>
   );
 };

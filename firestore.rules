@@ -36,6 +36,7 @@ service cloud.firestore {
           'staffName',
           'role',
           'avatarColor',
+          'avatarId',
           'monthlyGoal',
           'dailyGoal',
           'workspaceId'
@@ -45,6 +46,7 @@ service cloud.firestore {
         data.staffName is string && data.staffName.size() >= 1 && data.staffName.size() <= 80 &&
         data.role is string && data.role.size() >= 1 && data.role.size() <= 80 &&
         data.avatarColor is string && data.avatarColor.size() >= 4 && data.avatarColor.size() <= 16 &&
+        (!('avatarId' in data) || (data.avatarId is string && data.avatarId.size() >= 1 && data.avatarId.size() <= 64)) &&
         data.monthlyGoal is int && data.monthlyGoal >= 1 && data.monthlyGoal <= 10000 &&
         data.dailyGoal is int && data.dailyGoal >= 1 && data.dailyGoal <= 1000 &&
         data.workspaceId is string && data.workspaceId == 'aurelia-office';
@@ -147,7 +149,10 @@ service cloud.firestore {
         (
           incoming().diff(existing()).affectedKeys().hasOnly(['staffLoginId']) ||
           incoming().diff(existing()).affectedKeys().hasOnly(['role']) ||
-          incoming().diff(existing()).affectedKeys().hasOnly(['monthlyGoal', 'dailyGoal'])
+          incoming().diff(existing()).affectedKeys().hasOnly(['monthlyGoal', 'dailyGoal']) ||
+          incoming().diff(existing()).affectedKeys().hasOnly(['avatarId']) ||
+          incoming().diff(existing()).affectedKeys().hasOnly(['avatarColor']) ||
+          incoming().diff(existing()).affectedKeys().hasOnly(['avatarId', 'avatarColor'])
         );
       allow delete: if isValidId(staffId) && existing().workspaceId == 'aurelia-office';
     }
